@@ -9,7 +9,7 @@ layer, not the "what/why" (that's SPEC/ADR).
 ## 1. Requirements
 
 ### Functional
-- Register/login with username + PIN; recover via one-time code.
+- Register/login with username + password; recover via one-time code.
 - Create weddings; owner invites family via share code; roles owner/editor/viewer.
 - CRUD guests (invitees) with RSVP status; filter/search; live stats.
 
@@ -61,9 +61,9 @@ HTTP → CORS → RequestID → Logger → PanicRecover
 
 ### 3.1 Register
 ```
-Client → POST /auth/register {username, display_name, pin}
+Client → POST /auth/register {username, display_name, password}
 Service: validate username format + uniqueness
-         bcrypt(pin) → pin_hash
+         bcrypt(password) → password_hash
          gen recovery_code (random) → recovery_hash = bcrypt(code)
          INSERT user
          issue access+refresh JWT
@@ -123,7 +123,7 @@ Single aggregate query — no N+1. Cheap at v1 volumes; add a cached counter onl
 | 403 | `forbidden` | authenticated but role too low |
 | 404 | `not_found` | resource absent **or** caller not a member (deliberate ambiguity) |
 | 409 | `conflict` | username/share_code collision, duplicate membership |
-| 423 | `locked` | account locked after N failed PIN attempts |
+| 423 | `locked` | account locked after N failed login attempts |
 | 429 | `rate_limited` | login/recover throttled |
 | 500 | `internal` | unexpected; logged with request-id |
 

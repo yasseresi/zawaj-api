@@ -20,8 +20,8 @@ Ordered task list. See [plan.md](plan.md) for rationale, dependency graph, check
 
 ## P1 — Auth → C1
 - [ ] `User` model + AutoMigrate
-- [ ] auth pkg: bcrypt PIN, recovery-code gen+hash, JWT issue/verify (access+refresh)
-- [ ] DTOs + validation (username, PIN 4–6 digits)
+- [ ] auth pkg: bcrypt password, recovery-code gen+hash, JWT issue/verify (access+refresh)
+- [ ] DTOs + validation (username, password min 8)
 - [ ] `POST /auth/register` (returns recovery_code once)
 - [ ] `POST /auth/login`
 - [ ] `POST /auth/refresh` (rotate)

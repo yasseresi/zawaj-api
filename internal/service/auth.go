@@ -36,7 +36,7 @@ func (s *AuthService) Register(ctx context.Context, req dto.RegisterRequest) (*d
 		return nil, apperr.Conflict("username already taken")
 	}
 
-	pinHash, err := auth.HashSecret(req.PIN)
+	passwordHash, err := auth.HashSecret(req.Password)
 	if err != nil {
 		return nil, apperr.Internal("register failed")
 	}
@@ -52,7 +52,7 @@ func (s *AuthService) Register(ctx context.Context, req dto.RegisterRequest) (*d
 	u := &models.User{
 		Username:     req.Username,
 		DisplayName:  req.DisplayName,
-		PINHash:      pinHash,
+		PasswordHash: passwordHash,
 		RecoveryHash: recoveryHash,
 	}
 	if err := s.users.Create(ctx, u); err != nil {
@@ -71,13 +71,13 @@ func (s *AuthService) Register(ctx context.Context, req dto.RegisterRequest) (*d
 func (s *AuthService) Login(ctx context.Context, req dto.LoginRequest) (*dto.AuthResponse, error) {
 	u, err := s.users.ByUsername(ctx, req.Username)
 	if errors.Is(err, repository.ErrNotFound) {
-		return nil, apperr.Unauthenticated("invalid username or PIN")
+		return nil, apperr.Unauthenticated("invalid username or password")
 	}
 	if err != nil {
 		return nil, apperr.Internal("login failed")
 	}
-	if !auth.VerifySecret(u.PINHash, req.PIN) {
-		return nil, apperr.Unauthenticated("invalid username or PIN")
+	if !auth.VerifySecret(u.PasswordHash, req.Password) {
+		return nil, apperr.Unauthenticated("invalid username or password")
 	}
 	pair, err := s.tokens.Issue(u.ID)
 	if err != nil {
@@ -117,7 +117,7 @@ func (s *AuthService) Recover(ctx context.Context, req dto.RecoverRequest) (*dto
 		return nil, apperr.Unauthenticated("invalid username or recovery code")
 	}
 
-	pinHash, err := auth.HashSecret(req.NewPIN)
+	passwordHash, err := auth.HashSecret(req.NewPassword)
 	if err != nil {
 		return nil, apperr.Internal("recover failed")
 	}
@@ -129,7 +129,7 @@ func (s *AuthService) Recover(ctx context.Context, req dto.RecoverRequest) (*dto
 	if err != nil {
 		return nil, apperr.Internal("recover failed")
 	}
-	u.PINHash = pinHash
+	u.PasswordHash = passwordHash
 	u.RecoveryHash = newCodeHash
 	if err := s.users.Update(ctx, u); err != nil {
 		return nil, apperr.Internal("recover failed")

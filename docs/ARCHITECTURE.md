@@ -92,7 +92,7 @@ destructive prod changes.
 
 ---
 
-## ADR-003: Username + PIN + one-time recovery code auth
+## ADR-003: Username + password + one-time recovery code auth
 
 **Status:** Accepted · **Date:** 2026-08-26
 
@@ -101,22 +101,26 @@ Target community largely lacks email and often won't share phone numbers. Email/
 kill adoption. Still need a per-user secret — username-only lets anyone impersonate anyone.
 
 ### Decision
-Register with **username (unique) + PIN (4–6 digits)**. Server bcrypt-hashes the PIN,
+Register with **username (unique) + password (min 8)**. Server bcrypt-hashes the password,
 generates a random **recovery code** returned **once** in plaintext (bcrypt hash stored).
 Recovery code is the *only* account-reset path. Rate-limit + lockout on login/recover.
 
 ### Options
 | Option | Friction | Security | Reset path |
 |---|---|---|---|
-| A. Username + PIN + recovery code (chosen) | Very low | Medium | recovery code |
-| B. Username only (no secret) | Lowest | **None** | n/a |
+| A. Username + password (min 8) + recovery code (chosen) | Medium | High | recovery code |
+| B. Username + PIN + recovery code | Very low | Medium | recovery code |
 | C. Email/phone OTP | High | High | email/SMS |
 
-**Pros:** no email/SMS dependency, one-screen signup, works offline-ish for the community.
-**Cons:** small PIN keyspace → brute-forceable without protection; lost recovery code = lost account.
+Chose **A** over the original PIN (B) after the user prioritized security: a min-8 password
+resists online guessing far better than a 4–6 digit PIN, at the cost of more typing.
+
+**Pros:** no email/SMS dependency, one-screen signup, strong secret, works for the community.
+**Cons:** more typing than a PIN; lost recovery code = lost account.
 
 ### Consequences
-- **Must** rate-limit and lock out after N failed PINs (small keyspace is the main risk).
+- Rate-limit + lock out after N failed logins (defense-in-depth against stuffing; the main
+  brute-force risk is much lower than a PIN would carry).
 - UI must force the user to save the recovery code at signup (no other reset channel).
 - Revisit if account-takeover appears: add optional phone as recovery, or device binding.
 

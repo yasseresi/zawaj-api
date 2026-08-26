@@ -4,17 +4,18 @@ package dto
 
 import "zawaj/internal/models"
 
-// RegisterRequest creates a new account.
+// RegisterRequest creates a new account. Password is length-only (min 8); bcrypt
+// ignores bytes past 72, so we cap there.
 type RegisterRequest struct {
 	Username    string `json:"username" binding:"required,min=3,max=30,alphanum"`
 	DisplayName string `json:"display_name" binding:"required,max=80"`
-	PIN         string `json:"pin" binding:"required,min=4,max=6,numeric"`
+	Password    string `json:"password" binding:"required,min=8,max=72"`
 }
 
-// LoginRequest authenticates with username + PIN.
+// LoginRequest authenticates with username + password.
 type LoginRequest struct {
 	Username string `json:"username" binding:"required"`
-	PIN      string `json:"pin" binding:"required"`
+	Password string `json:"password" binding:"required"`
 }
 
 // RefreshRequest exchanges a refresh token for a new pair.
@@ -22,11 +23,11 @@ type RefreshRequest struct {
 	Refresh string `json:"refresh" binding:"required"`
 }
 
-// RecoverRequest resets the PIN using the one-time recovery code.
+// RecoverRequest resets the password using the one-time recovery code.
 type RecoverRequest struct {
 	Username     string `json:"username" binding:"required"`
 	RecoveryCode string `json:"recovery_code" binding:"required"`
-	NewPIN       string `json:"new_pin" binding:"required,min=4,max=6,numeric"`
+	NewPassword  string `json:"new_password" binding:"required,min=8,max=72"`
 }
 
 // UpdateMeRequest edits the current user's profile.

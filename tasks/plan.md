@@ -17,7 +17,7 @@ Two seams make the swarm safe (no giant shared-file conflicts):
 - **`Notifier` interface** — guest/member services emit events against an interface; the
   notifications module implements it. Producers and consumer build independently.
 
-**Stack:** Go 1.22 + Gin + GORM + Postgres. Auth: username+PIN+JWT. See docs.
+**Stack:** Go 1.22 + Gin + GORM + Postgres. Auth: username+password+JWT. See docs.
 
 ---
 
@@ -51,8 +51,8 @@ Goal: `make run` serves a health check against a real Postgres.
 ### P1 — Auth vertical
 Goal: a user can register, log in, refresh, recover — end to end.
 - Models: `User`. AutoMigrate wired.
-- `auth` pkg: bcrypt PIN hash, recovery-code gen+hash, JWT issue/verify (access+refresh).
-- DTOs + validation (username format, PIN 4–6 digits).
+- `auth` pkg: bcrypt password hash, recovery-code gen+hash, JWT issue/verify (access+refresh).
+- DTOs + validation (username format, password min 8).
 - Endpoints: register, login, refresh, recover, `GET/PATCH /me`.
 - `RequireAuth` middleware (parse access → userID in ctx).
 - **Checkpoint C1:** register→login→call `/me`→refresh→recover all pass in integration test. ✅ commit.
@@ -86,7 +86,7 @@ Goal: live counts per wedding.
 
 ### P6 — Hardening (pre-ship)
 Goal: close the security/ops gaps flagged in ADRs.
-- **Rate-limit + lockout** on login/recover (ADR-003 — PIN brute-force is the real threat).
+- **Rate-limit + lockout** on login/recover (ADR-003 — password brute-force/stuffing is the real threat).
 - Replace AutoMigrate with **golang-migrate** versioned migrations (ADR-002).
 - Per-request context timeout; graceful shutdown on SIGTERM (drain + close pool).
 - Error-envelope polish: map GORM errors → 409/404/500; never leak SQL.
@@ -115,7 +115,7 @@ invite-sending) exists. If new modules surface → revise SPEC/ADR before P4.
 | Risk | Mitigation | Phase |
 |---|---|---|
 | Missed authz on a route | Single guarded router group; C3 tests assert deny paths | P3 |
-| PIN brute-force | Rate-limit + lockout | P6 |
+| password brute-force/stuffing | Rate-limit + lockout | P6 |
 | Design mismatch → guest rework | G0 gate before P4 | pre-P4 |
 | AutoMigrate data loss in prod | Switch to versioned migrations | P6 |
 | Concurrent guest edits overwrite | Accepted (LWW) v1; add version check if reported | later |

@@ -21,8 +21,8 @@ type Config struct {
 	JWTAccessTTL     time.Duration
 	JWTRefreshTTL    time.Duration
 
-	PINMaxAttempts int
-	PINLockout     time.Duration
+	LoginMaxAttempts int
+	LoginLockout     time.Duration
 }
 
 // Load reads configuration from the environment (and an optional .env file for
@@ -39,8 +39,8 @@ func Load() (*Config, error) {
 		JWTRefreshSecret: os.Getenv("JWT_REFRESH_SECRET"),
 		JWTAccessTTL:     durationEnv("JWT_ACCESS_TTL", 15*time.Minute),
 		JWTRefreshTTL:    durationEnv("JWT_REFRESH_TTL", 720*time.Hour),
-		PINMaxAttempts:   intEnv("PIN_MAX_ATTEMPTS", 5),
-		PINLockout:       durationEnv("PIN_LOCKOUT", 15*time.Minute),
+		LoginMaxAttempts: intEnv("LOGIN_MAX_ATTEMPTS", 5),
+		LoginLockout:     durationEnv("LOGIN_LOCKOUT", 15*time.Minute),
 	}
 
 	if cfg.DatabaseURL == "" {

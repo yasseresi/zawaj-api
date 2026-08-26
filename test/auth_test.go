@@ -10,7 +10,7 @@ func TestAuthFlow(t *testing.T) {
 
 	// Register
 	code, body := do(t, e, http.MethodPost, "/api/v1/auth/register", "", map[string]any{
-		"username": "ahmed", "display_name": "Ahmed", "pin": "1234",
+		"username": "ahmed", "display_name": "Ahmed", "password": "correcthorse",
 	})
 	if code != http.StatusCreated {
 		t.Fatalf("register: want 201, got %d (%v)", code, body)
@@ -34,23 +34,23 @@ func TestAuthFlow(t *testing.T) {
 
 	// Duplicate username -> 409
 	if code, _ := do(t, e, http.MethodPost, "/api/v1/auth/register", "", map[string]any{
-		"username": "ahmed", "display_name": "X", "pin": "9999",
+		"username": "ahmed", "display_name": "X", "password": "anotherpass",
 	}); code != http.StatusConflict {
 		t.Fatalf("dup register: want 409, got %d", code)
 	}
 
-	// Invalid PIN format -> 400
+	// Too-short password -> 400
 	if code, _ := do(t, e, http.MethodPost, "/api/v1/auth/register", "", map[string]any{
-		"username": "zed", "display_name": "Z", "pin": "ab",
+		"username": "zed", "display_name": "Z", "password": "short",
 	}); code != http.StatusBadRequest {
-		t.Fatalf("bad pin: want 400, got %d", code)
+		t.Fatalf("short password: want 400, got %d", code)
 	}
 
-	// Wrong PIN -> 401
+	// Wrong password -> 401
 	if code, _ := do(t, e, http.MethodPost, "/api/v1/auth/login", "", map[string]any{
-		"username": "ahmed", "pin": "0000",
+		"username": "ahmed", "password": "wrongpassword",
 	}); code != http.StatusUnauthorized {
-		t.Fatalf("wrong pin: want 401, got %d", code)
+		t.Fatalf("wrong password: want 401, got %d", code)
 	}
 
 	// Refresh -> 200
@@ -60,15 +60,15 @@ func TestAuthFlow(t *testing.T) {
 		t.Fatalf("refresh: want 200, got %d", code)
 	}
 
-	// Recover -> 200, then login with new PIN
+	// Recover -> 200, then login with new password
 	if code, _ := do(t, e, http.MethodPost, "/api/v1/auth/recover", "", map[string]any{
-		"username": "ahmed", "recovery_code": recovery, "new_pin": "5678",
+		"username": "ahmed", "recovery_code": recovery, "new_password": "brandnewpass",
 	}); code != http.StatusOK {
 		t.Fatalf("recover: want 200, got %d", code)
 	}
 	if code, _ := do(t, e, http.MethodPost, "/api/v1/auth/login", "", map[string]any{
-		"username": "ahmed", "pin": "5678",
+		"username": "ahmed", "password": "brandnewpass",
 	}); code != http.StatusOK {
-		t.Fatalf("login new pin: want 200, got %d", code)
+		t.Fatalf("login new password: want 200, got %d", code)
 	}
 }

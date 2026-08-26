@@ -5,7 +5,7 @@
 > **Go + Gin backend only**. Flutter mobile app comes later and consumes this API.
 
 **Status:** draft — awaiting design import to finalize guest fields.
-**Last decisions locked:** collaboration roles (owner/editor/viewer); v1 scope = shared list + RSVP tracking; DB = Postgres + GORM; auth = username + PIN + JWT.
+**Last decisions locked:** collaboration roles (owner/editor/viewer); v1 scope = shared list + RSVP tracking; DB = Postgres + GORM; auth = username + password + JWT.
 
 ---
 
@@ -17,13 +17,13 @@ shared guest list, add/track invitees, and follow each guest's RSVP status
 
 **Target users:** wedding organizers and their families in a community that does **not**
 use email or phone-number login. Auth must be near-zero friction: a chosen **username** +
-short **PIN**.
+strong **password**.
 
 **Out of scope for v1 (later phases):** sending invitations (SMS/WhatsApp), seating/tables,
 phone-contacts import, push notifications, admin/moderation, analytics.
 
 ### Acceptance criteria (v1 "done")
-- A user can register with username + PIN, receive a recovery code, and log in.
+- A user can register with username + password, receive a recovery code, and log in.
 - A user can create a wedding and becomes its **owner**.
 - An owner can generate a **share code**; another user can join via that code as **editor** or **viewer**.
 - **Editors** can add/edit/delete guests and change RSVP status; **viewers** are read-only; **owner** additionally manages members and wedding settings.
@@ -39,7 +39,7 @@ phone-contacts import, push notifications, admin/moderation, analytics.
 - **Language:** Go 1.22+
 - **Web:** Gin
 - **DB:** PostgreSQL 15+ via **GORM** (auto-migrate for v1; switch to versioned migrations before prod)
-- **Auth:** username + PIN (bcrypt), JWT access + refresh (golang-jwt), one-time recovery code
+- **Auth:** username + password (bcrypt), JWT access + refresh (golang-jwt), one-time recovery code
 - **Config:** env vars via `.env` (godotenv) → typed `config.Config`
 - **Validation:** `go-playground/validator` on DTOs
 - **UUIDs:** google/uuid
@@ -69,7 +69,7 @@ backend/
 │   ├── database/              # gorm connect + AutoMigrate
 │   ├── models/                # gorm models (User, Wedding, Membership, Guest, ActivityLog)
 │   ├── dto/                   # request/response structs + validation tags
-│   ├── auth/                  # pin hashing, jwt issue/verify, recovery codes
+│   ├── auth/                  # password hashing, jwt issue/verify, recovery codes
 │   ├── middleware/            # RequireAuth, RequireRole, CORS, request logging, recovery
 │   ├── repository/            # gorm data access, one file per aggregate
 │   ├── service/              # business logic (auth, wedding, guest, member, stats)
@@ -101,7 +101,7 @@ User
   id            uuid pk
   username      string unique (3–30, lowercase alnum + _)
   display_name  string
-  pin_hash      string        (bcrypt of 4–6 digit PIN)
+  password_hash      string        (bcrypt of password)
   recovery_hash string        (bcrypt of one-time recovery code)
   created_at, updated_at
 
@@ -163,10 +163,10 @@ Standard JSON envelope: `{ "data": ..., "error": null }` or `{ "data": null, "er
 
 **Auth**
 ```
-POST /auth/register     {username, display_name, pin}  -> {user, access, refresh, recovery_code}
-POST /auth/login        {username, pin}                -> {access, refresh}
+POST /auth/register     {username, display_name, password}  -> {user, access, refresh, recovery_code}
+POST /auth/login        {username, password}                -> {access, refresh}
 POST /auth/refresh      {refresh}                       -> {access, refresh}
-POST /auth/recover      {username, recovery_code, new_pin} -> {access, refresh, recovery_code}
+POST /auth/recover      {username, recovery_code, new_password} -> {access, refresh, recovery_code}
 GET  /me                                                 -> current user
 PATCH /me               {display_name?}                  -> user
 ```
@@ -241,14 +241,14 @@ Events → recipients:
 
 ## 6. Auth design (low-friction)
 
-- **Register:** username (unique, validated) + PIN (4–6 digits). Server bcrypt-hashes PIN,
+- **Register:** username (unique, validated) + password (min 8). Server bcrypt-hashes the password,
   generates a random **recovery code** (e.g. 10 chars), returns it **once** in plaintext,
   stores only its bcrypt hash. UI must tell user to save it (no email/phone to reset).
-- **Login:** username + PIN → access JWT (short TTL ~15m) + refresh JWT (long TTL ~30d).
-- **Recover:** username + recovery code + new PIN → resets PIN, issues fresh recovery code.
+- **Login:** username + password → access JWT (short TTL ~15m) + refresh JWT (long TTL ~30d).
+- **Recover:** username + recovery code + new password → resets it, issues fresh recovery code.
 - **Middleware:** `RequireAuth` parses Bearer access token → sets `userID` in ctx.
   `RequireRole(min)` loads membership for `:id` and checks role ≥ min.
-- **Rate-limit** login/recover to blunt PIN brute force (PIN space is small). Lockout after N fails.
+- **Rate-limit** login/recover to blunt brute-force and credential stuffing. Lockout after N fails.
 
 ---
 
@@ -265,7 +265,7 @@ Events → recipients:
 
 **Always**
 - Enforce membership + role on every wedding-scoped route (default deny).
-- Hash secrets (PIN, recovery code) with bcrypt; never log or return them (except recovery code once, at issue).
+- Hash secrets (password, recovery code) with bcrypt; never log or return them (except recovery code once, at issue).
 - Validate + bind all input via DTOs; never bind GORM models straight from request bodies.
 - Scope every query by `wedding_id` derived from the authenticated membership, not from the body.
 
@@ -275,7 +275,7 @@ Events → recipients:
 - Switching auth model or exposing any endpoint unauthenticated.
 
 **Never**
-- Store PIN/recovery code in plaintext.
+- Store password/recovery code in plaintext.
 - Trust `wedding_id`/`role` from the request body.
 - Return another user's data without a shared-membership check.
 - Hard-delete a wedding without owner confirmation semantics.

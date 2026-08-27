@@ -6,6 +6,7 @@ package router
 
 import (
 	"log/slog"
+	"time"
 
 	"zawaj/internal/handler"
 	"zawaj/internal/middleware"
@@ -13,6 +14,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
+
+// requestTimeout bounds how long any single request may run before its context
+// is cancelled (propagated to DB queries). Well above p95 for v1 workloads.
+const requestTimeout = 15 * time.Second
 
 // Module is implemented by every feature package. Register attaches the module's
 // routes under the given /api/v1 group. Modules must not touch global wiring.
@@ -34,6 +39,7 @@ func New(db *gorm.DB, log *slog.Logger, production bool, modules ...Module) *gin
 		middleware.RequestID(),
 		middleware.Logger(log),
 		middleware.Recover(log),
+		middleware.Timeout(requestTimeout),
 	)
 
 	health := handler.NewHealth(db)

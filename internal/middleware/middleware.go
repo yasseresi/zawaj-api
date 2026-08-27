@@ -3,6 +3,7 @@
 package middleware
 
 import (
+	"context"
 	"log/slog"
 	"time"
 
@@ -59,6 +60,18 @@ func Recover(log *slog.Logger) gin.HandlerFunc {
 				c.Abort()
 			}
 		}()
+		c.Next()
+	}
+}
+
+// Timeout attaches a deadline to each request's context so slow DB queries are
+// cancelled rather than piling up connections. Handlers propagate this via
+// c.Request.Context().
+func Timeout(d time.Duration) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), d)
+		defer cancel()
+		c.Request = c.Request.WithContext(ctx)
 		c.Next()
 	}
 }

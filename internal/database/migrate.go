@@ -12,5 +12,12 @@ import (
 func Migrate(db *gorm.DB) error {
 	return db.AutoMigrate(
 		&models.User{},
+		&models.Wedding{},
+		&models.Membership{},
+		&models.InviteLink{},
+		&models.Guest{},
+		&models.GuestNote{},
+		&models.ActivityLog{},
+		&models.Notification{},
 	)
 }

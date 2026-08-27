@@ -7,7 +7,7 @@ import "zawaj/internal/models"
 // RegisterRequest creates a new account. Password is length-only (min 8); bcrypt
 // ignores bytes past 72, so we cap there.
 type RegisterRequest struct {
-	Username    string `json:"username" binding:"required,min=3,max=30,alphanum"`
+	Username    string `json:"username" binding:"required,min=3,max=120,excludesall= "` // may be an email
 	DisplayName string `json:"display_name" binding:"required,max=80"`
 	Password    string `json:"password" binding:"required,min=8,max=72"`
 }

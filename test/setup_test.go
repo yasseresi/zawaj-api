@@ -44,15 +44,19 @@ func newApp(t *testing.T) *gin.Engine {
 	cleanDB(t, db)
 
 	tokens := auth.NewManager("test-access", "test-refresh", 15*time.Minute, 720*time.Hour)
-	authModule := handler.NewAuth(service.NewAuthService(repository.NewUserRepo(db), tokens), tokens)
+	userRepo := repository.NewUserRepo(db)
+	weddingRepo := repository.NewWeddingRepo(db)
+	authModule := handler.NewAuth(service.NewAuthService(userRepo, tokens), tokens)
+	weddingModule := handler.NewWedding(service.NewWeddingService(weddingRepo), weddingRepo, tokens)
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return router.New(db, log, true, authModule)
+	return router.New(db, log, true, authModule, weddingModule)
 }
 
 // cleanDB truncates all tables so each test starts from empty.
 func cleanDB(t *testing.T, db *gorm.DB) {
 	t.Helper()
-	if err := db.Exec("TRUNCATE users RESTART IDENTITY CASCADE").Error; err != nil {
+	err := db.Exec("TRUNCATE users, weddings, memberships, invite_links, guests, guest_notes, activity_logs, notifications RESTART IDENTITY CASCADE").Error
+	if err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 }
@@ -78,6 +82,23 @@ func do(t *testing.T, e *gin.Engine, method, path, token string, body any) (int,
 		_ = json.Unmarshal(rec.Body.Bytes(), &out)
 	}
 	return rec.Code, out
+}
+
+// register creates a user and returns its access token and user id.
+func register(t *testing.T, e *gin.Engine, username string) (access, userID string) {
+	t.Helper()
+	code, body := do(t, e, "POST", "/api/v1/auth/register", "", map[string]any{
+		"username": username, "display_name": username, "password": "password123",
+	})
+	if code != 201 {
+		t.Fatalf("register %s: want 201, got %d (%v)", username, code, body)
+	}
+	d := dataOf(body)
+	access, _ = d["access"].(string)
+	if u, ok := d["user"].(map[string]any); ok {
+		userID, _ = u["id"].(string)
+	}
+	return access, userID
 }
 
 // dataOf returns the "data" object from a response envelope.

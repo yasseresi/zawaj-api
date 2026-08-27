@@ -171,7 +171,16 @@ Push delivery (FCM), email delivery                                             
 
 ---
 
-## ⚠ Conflicts with earlier decisions — need user ruling
+## ✅ Resolved (2026-08-27)
+- **v1 scope:** defer OAuth, premium/subscription, guest reminders/SMS-WhatsApp, PDF export,
+  FCM push. **v1 = lists, guests(+notes), roles, collaborator invites (link/QR + accept/decline),
+  activity feed, stats, CSV export, notifications table.**
+- **Email:** nullable on User. Collaboration primarily via **share link/QR + invite-by-username**;
+  email-invite only when the invitee has an email. No email required to sign up.
+- Status canonical = `pending|confirmed|declined` (invited = pending). Companions = accompanying
+  count (Ahmed +5 → companions 5, total people 6). CSV v1, PDF later.
+
+## ⚠ Original conflicts (now resolved above)
 1. **Email.** Earlier: "community has no email." Design uses email for: profile display,
    collaborator invite-by-email, email notifications, OAuth. → Resolution: **email is optional**
    on User; **collaboration primarily via share link/QR + invite-by-username**; email-invite is a

@@ -44,9 +44,12 @@ func main() {
 	// Dependency wiring. Feature modules are appended to the router as phases land.
 	tokens := auth.NewManager(cfg.JWTAccessSecret, cfg.JWTRefreshSecret, cfg.JWTAccessTTL, cfg.JWTRefreshTTL)
 	userRepo := repository.NewUserRepo(db)
-	authModule := handler.NewAuth(service.NewAuthService(userRepo, tokens), tokens)
+	weddingRepo := repository.NewWeddingRepo(db)
 
-	r := router.New(db, log, cfg.IsProduction(), authModule)
+	authModule := handler.NewAuth(service.NewAuthService(userRepo, tokens), tokens)
+	weddingModule := handler.NewWedding(service.NewWeddingService(weddingRepo), weddingRepo, tokens)
+
+	r := router.New(db, log, cfg.IsProduction(), authModule, weddingModule)
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,

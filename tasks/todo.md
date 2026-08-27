@@ -1,5 +1,13 @@
 # Zawaj Backend — TODO
 
+## PROGRESS (2026-08-27)
+- ✅ P0 scaffold (C0) · ✅ P1 auth username+password (C1) · ✅ P2 weddings (C2) · ✅ P3 roles+invite-links (C3)
+- ✅ Full schema migrated (User, Wedding, Membership, InviteLink, Guest, GuestNote, ActivityLog, Notification)
+- ✅ Design imported from زواج/*.jsx → docs/DESIGN_SPEC.md
+- ▶ NEXT (swarm-ready, schema exists): guests(+notes), activity feed, stats, notifications, CSV export
+- Local dev DB: EDB PostgreSQL 17 on :5432 (postgres/postgres), db `zawaj` (Homebrew pg15 crashed)
+
+
 Ordered task list. See [plan.md](plan.md) for rationale, dependency graph, checkpoints.
 `[ ]` todo · `[~]` in progress · `[x]` done. Commit at each checkpoint (C0–C6).
 

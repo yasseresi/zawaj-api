@@ -36,7 +36,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := database.Migrate(db); err != nil {
+	if err := database.RunMigrations(cfg.DatabaseURL); err != nil {
 		log.Error("migration failed", "error", err)
 		os.Exit(1)
 	}

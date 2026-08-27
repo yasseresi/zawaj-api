@@ -6,9 +6,8 @@ import (
 	"gorm.io/gorm"
 )
 
-// Migrate runs AutoMigrate for all models. Each phase appends its models here.
-// NOTE: AutoMigrate is for dev only — replace with versioned migrations (P6)
-// before any production data exists (see ADR-002).
+// Migrate runs GORM AutoMigrate for all models. Used only by tests for a fast,
+// self-contained schema. Production uses RunMigrations (versioned SQL, ADR-002).
 func Migrate(db *gorm.DB) error {
 	return db.AutoMigrate(
 		&models.User{},

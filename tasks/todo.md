@@ -1,11 +1,14 @@
 # Zawaj Backend — TODO
 
-## PROGRESS (2026-08-27)
-- ✅ P0 scaffold (C0) · ✅ P1 auth username+password (C1) · ✅ P2 weddings (C2) · ✅ P3 roles+invite-links (C3)
-- ✅ Full schema migrated (User, Wedding, Membership, InviteLink, Guest, GuestNote, ActivityLog, Notification)
-- ✅ Design imported from زواج/*.jsx → docs/DESIGN_SPEC.md
-- ▶ NEXT (swarm-ready, schema exists): guests(+notes), activity feed, stats, notifications, CSV export
-- Local dev DB: EDB PostgreSQL 17 on :5432 (postgres/postgres), db `zawaj` (Homebrew pg15 crashed)
+## PROGRESS (2026-08-27) — v1 feature-complete
+- ✅ P0 scaffold · ✅ P1 auth (username+password, JWT, recovery) · ✅ P2 weddings · ✅ P3 roles+invite-links/QR
+- ✅ P4 guests (+notes, status, activity history) · ✅ settings (change pw, prefs)
+- ✅ SWARM P5 (4 parallel worktree agents, merged): stats · activity feed · notifications (fan-out) · CSV export
+- ✅ Full schema migrated (8 tables) · ✅ design imported → docs/DESIGN_SPEC.md
+- ✅ All integration tests green (-race): auth, roles matrix, guests, settings, stats, activity, notifications, export
+- Local dev DB: EDB PostgreSQL 17 on :5432 (postgres/postgres), db `zawaj`
+- ▶ REMAINING: P6 hardening (login rate-limit/lockout; AutoMigrate→golang-migrate) · then test→secure→review→ship
+- LATER (deferred v1): OAuth, premium/subscription, PDF export, FCM push, guest reminders (none)
 
 
 Ordered task list. See [plan.md](plan.md) for rationale, dependency graph, checkpoints.

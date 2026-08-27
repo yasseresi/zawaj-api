@@ -15,64 +15,65 @@ Ordered task list. See [plan.md](plan.md) for rationale, dependency graph, check
 `[ ]` todo · `[~]` in progress · `[x]` done. Commit at each checkpoint (C0–C6).
 
 ## G0 — Pre-build gate (BLOCKING for P4)
-- [ ] Import design: read `zawaj_app/screens-*.jsx`, `icons.jsx`, `design-canvas.jsx`, `styles.css`
-- [ ] Confirm guest fields / statuses / no unplanned modules → reconcile SPEC if needed
-- [ ] Answer SPEC open Qs: join role (viewer?), party_size semantics, multi-wedding, recovery-code UX
+- [x] Import design: read `zawaj_app/screens-*.jsx`, `icons.jsx`, `design-canvas.jsx`, `styles.css`
+- [x] Confirm guest fields / statuses / no unplanned modules → reconcile SPEC if needed
+- [x] Answer SPEC open Qs: join role (viewer?), party_size semantics, multi-wedding, recovery-code UX
 
 ## P0 — Scaffold & infra → C0
-- [ ] `go mod init`, folder layout (cmd/api, internal/*, pkg)
-- [ ] config pkg (env → typed Config), `.env.example`
-- [ ] GORM Postgres connect + pool settings
-- [ ] Gin router + middleware: CORS → RequestID → Logger → Recover
-- [ ] Response envelope `{data,error}` + error-code constants
-- [ ] `GET /healthz`, `GET /readyz` (DB ping)
-- [ ] Makefile, Dockerfile, docker-compose.yml
-- [ ] **C0:** `make up` + `curl /healthz`=200, `/readyz` pings DB → commit
+- [x] `go mod init`, folder layout (cmd/api, internal/*, pkg)
+- [x] config pkg (env → typed Config), `.env.example`
+- [x] GORM Postgres connect + pool settings
+- [x] Gin router + middleware: CORS → RequestID → Logger → Recover
+- [x] Response envelope `{data,error}` + error-code constants
+- [x] `GET /healthz`, `GET /readyz` (DB ping)
+- [x] Makefile, Dockerfile, docker-compose.yml
+- [x] **C0:** `make up` + `curl /healthz`=200, `/readyz` pings DB → commit
 
 ## P1 — Auth → C1
-- [ ] `User` model + AutoMigrate
-- [ ] auth pkg: bcrypt password, recovery-code gen+hash, JWT issue/verify (access+refresh)
-- [ ] DTOs + validation (username, password min 8)
-- [ ] `POST /auth/register` (returns recovery_code once)
-- [ ] `POST /auth/login`
-- [ ] `POST /auth/refresh` (rotate)
-- [ ] `POST /auth/recover`
-- [ ] `RequireAuth` middleware
-- [ ] `GET /me`, `PATCH /me`
-- [ ] Integration tests: full auth flow
-- [ ] **C1** → commit
+- [x] `User` model + AutoMigrate
+- [x] auth pkg: bcrypt password, recovery-code gen+hash, JWT issue/verify (access+refresh)
+- [x] DTOs + validation (username, password min 8)
+- [x] `POST /auth/register` (returns recovery_code once)
+- [x] `POST /auth/login`
+- [x] `POST /auth/refresh` (rotate)
+- [x] `POST /auth/recover`
+- [x] `RequireAuth` middleware
+- [x] `GET /me`, `PATCH /me`
+- [x] Integration tests: full auth flow
+- [x] **C1** → commit
 
 ## P2 — Wedding → C2
-- [ ] `Wedding` + `Membership` models + indexes
-- [ ] `POST /weddings` (creator → owner membership, same txn)
-- [ ] `GET /weddings` (my weddings via membership)
-- [ ] `GET /weddings/:id` (+ my role)
-- [ ] `PATCH /weddings/:id` (owner)
-- [ ] `DELETE /weddings/:id` (owner, cascade)
-- [ ] `POST /weddings/:id/share` (regenerate code)
-- [ ] Tests
-- [ ] **C2** → commit
+- [x] `Wedding` + `Membership` models + indexes
+- [x] `POST /weddings` (creator → owner membership, same txn)
+- [x] `GET /weddings` (my weddings via membership)
+- [x] `GET /weddings/:id` (+ my role)
+- [x] `PATCH /weddings/:id` (owner)
+- [x] `DELETE /weddings/:id` (owner, cascade)
+- [~] ~~`POST /weddings/:id/share`~~ OBSOLETE — replaced by role-scoped invite-links (`POST /weddings/:id/invite-links`, `/invite/:token/accept`) per design
+- [x] Tests
+- [x] **C2** → commit
 
 ## P3 — Membership & roles (authz core) → C3
-- [ ] `RequireRole(min)` middleware (load membership → 404/403)
-- [ ] Wire all `/weddings/:id/*` under one guarded router group
-- [ ] `POST /weddings/join` (idempotent, default viewer)
-- [ ] `GET /weddings/:id/members`
-- [ ] `PATCH /weddings/:id/members/:userId` (owner)
-- [ ] `DELETE /weddings/:id/members/:userId` (owner or self-leave; owner must transfer first)
-- [ ] **Critical tests:** non-member→404, viewer-write→403, editor-does-owner-action→403
-- [ ] **C3** → commit
+- [x] `RequireRole(min)` middleware (load membership → 404/403)
+- [x] Wire all `/weddings/:id/*` under one guarded router group
+- [~] ~~`POST /weddings/join`~~ OBSOLETE — replaced by `POST /invite/:token/accept` (idempotent, no-downgrade)
+- [x] `GET /weddings/:id/members`
+- [x] `PATCH /weddings/:id/members/:userId` (owner)
+- [x] `DELETE /weddings/:id/members/:userId` (owner removes / self-leave) — NOTE: owner cannot leave; **transfer-ownership endpoint NOT built** → see below
+- [x] **Critical tests:** non-member→404, viewer-write→403, editor-does-owner-action→403
+- [ ] Transfer-ownership endpoint (owner → another member) — NOT built
+- [x] **C3** → commit
 
 ## P4 — Guests → C4  (needs G0 cleared)
-- [ ] `Guest` model + indexes (wedding_id; wedding_id,status; wedding_id,full_name)
-- [ ] `GET /weddings/:id/guests` (filter status/side/category + `q` + pagination)
-- [ ] `POST /weddings/:id/guests` (editor+)
-- [ ] `GET /weddings/:id/guests/:guestId`
-- [ ] `PATCH /weddings/:id/guests/:guestId` (editor+, incl status)
-- [ ] `DELETE /weddings/:id/guests/:guestId` (editor+)
-- [ ] Service: wedding_id from membership; valid status transitions
-- [ ] Tests (CRUD + viewer-blocked + filter/search correctness)
-- [ ] **C4** → commit
+- [x] `Guest` model + indexes (wedding_id; wedding_id,status; wedding_id,full_name)
+- [x] `GET /weddings/:id/guests` (filter status/side/category + `q` + pagination)
+- [x] `POST /weddings/:id/guests` (editor+)
+- [x] `GET /weddings/:id/guests/:guestId`
+- [x] `PATCH /weddings/:id/guests/:guestId` (editor+, incl status)
+- [x] `DELETE /weddings/:id/guests/:guestId` (editor+)
+- [x] Service: wedding_id from membership; valid status transitions
+- [x] Tests (CRUD + viewer-blocked + filter/search correctness)
+- [x] **C4** → commit
 
 ## SPINE / SWARM SPLIT
 P0–P3 above = **spine** (sequential, one hand). Below = **swarm** (parallel worktree agents,
@@ -82,33 +83,33 @@ merge after). Spine must compile + commit before swarm launches. Seams: `router.
 (as listed above — worktree agent A)
 
 ## P5 — Stats → C5  [SWARM]  (worktree agent B; reads Guest model — depends on P4 model contract)
-- [ ] `GET /weddings/:id/stats` (single aggregate query)
-- [ ] Test vs seeded fixture
-- [ ] **C5** → commit
+- [x] `GET /weddings/:id/stats` (single aggregate query)
+- [x] Test vs seeded fixture
+- [x] **C5** → commit
 
 ## P5b — Notifications → C5b  [SWARM]  (worktree agent C)
-- [ ] `Notification` model + index(user_id, read_at)
-- [ ] `Notifier` interface impl: fan event → recipients (other members)
-- [ ] `GET /notifications` (feed, ?unread, pagination)
-- [ ] `GET /notifications/unread_count`
-- [ ] `PATCH /notifications/:id/read`, `POST /notifications/read_all`
-- [ ] Wire emit points in guest/member services (via interface — no direct coupling)
-- [ ] Tests: event → correct recipients; read/unread transitions
-- [ ] **C5b** → commit
-- [ ] (later) FCM push + device_tokens; WebSocket realtime
+- [x] `Notification` model + index(user_id, read_at)
+- [x] `Notifier` interface impl: fan event → recipients (other members)
+- [x] `GET /notifications` (feed, ?unread, pagination)
+- [x] `GET /notifications/unread_count`
+- [x] `PATCH /notifications/:id/read`, `POST /notifications/read_all`
+- [x] Wire emit points in guest/member services (via interface — no direct coupling)
+- [x] Tests: event → correct recipients; read/unread transitions
+- [x] **C5b** → commit
+- [ ] (LATER) FCM push + device_tokens; WebSocket realtime — deferred, not built
 
 ## P5c — Member management polish  [SWARM]  (worktree agent D — if split from P3)
 
 ## P6 — Hardening → C6
-- [ ] Rate-limit + lockout on login/recover (423 on lock, 429 on throttle)
-- [ ] golang-migrate versioned migrations (retire AutoMigrate)
-- [ ] Per-request context timeout
-- [ ] Graceful shutdown on SIGTERM (drain + close pool)
-- [ ] GORM error mapping → 409/404/500, no SQL leak
-- [ ] **C6** → commit
+- [~] Login lockout done (423 after N fails). NOT done: recover throttle, 429 rate-limit
+- [ ] golang-migrate versioned migrations (retire AutoMigrate) — **NOT done (ship blocker)**
+- [ ] Per-request context timeout — NOT done
+- [x] Graceful shutdown on SIGTERM (drain + close pool)
+- [~] Service errors → typed apperr (no SQL leak) done; explicit raw-GORM unique→409 mapping NOT added (dup handled by pre-check)
+- [ ] **C6** → commit (blocked on migrations)
 
 ## After build
-- [ ] Phase: test — expand coverage (`agent-skills:test`)
-- [ ] Phase: secure — `security-review` + `VibeSec-Skill` (auth, authz, brute-force)
-- [ ] Phase: review — `agent-skills:review`
-- [ ] Phase: ship — deploy checklist, backups, migrations on target
+- [~] Tests exist per module (all -race green); no dedicated `agent-skills:test` expansion pass
+- [x] Phase: secure — `security-review` + `VibeSec-Skill` (auth, authz, brute-force)
+- [x] Phase: review — `agent-skills:review`
+- [ ] Phase: ship — deploy checklist, backups, migrations on target — NOT done

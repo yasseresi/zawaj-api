@@ -101,12 +101,12 @@ merge after). Spine must compile + commit before swarm launches. Seams: `router.
 ## P5c — Member management polish  [SWARM]  (worktree agent D — if split from P3)
 
 ## P6 — Hardening → C6
-- [~] Login lockout done (423 after N fails). NOT done: recover throttle, 429 rate-limit
-- [ ] golang-migrate versioned migrations (retire AutoMigrate) — **NOT done (ship blocker)**
-- [ ] Per-request context timeout — NOT done
+- [x] Account lockout on login + recover (423). SKIPPED (accepted): 429 rate-limit — lockout covers brute-force
+- [x] golang-migrate versioned migrations (embedded baseline) — AutoMigrate now tests-only
+- [x] Per-request context timeout (15s) middleware
 - [x] Graceful shutdown on SIGTERM (drain + close pool)
-- [~] Service errors → typed apperr (no SQL leak) done; explicit raw-GORM unique→409 mapping NOT added (dup handled by pre-check)
-- [ ] **C6** → commit (blocked on migrations)
+- [x] Service errors → typed apperr (no SQL leak). SKIPPED (accepted): explicit raw-GORM unique→409 (dup handled by pre-check)
+- [x] **C6** → committed
 
 ## After build
 - [~] Tests exist per module (all -race green); no dedicated `agent-skills:test` expansion pass

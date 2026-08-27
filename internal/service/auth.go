@@ -149,12 +149,17 @@ func (s *AuthService) Refresh(ctx context.Context, req dto.RefreshRequest) (*dto
 func (s *AuthService) Recover(ctx context.Context, req dto.RecoverRequest) (*dto.AuthResponse, error) {
 	u, err := s.users.ByUsername(ctx, req.Username)
 	if errors.Is(err, repository.ErrNotFound) {
+		auth.VerifySecret(dummyHash, req.RecoveryCode) // equalize timing
 		return nil, apperr.Unauthenticated("invalid username or recovery code")
 	}
 	if err != nil {
 		return nil, apperr.Internal("recover failed")
 	}
+	if u.LockedUntil != nil && u.LockedUntil.After(time.Now()) {
+		return nil, apperr.Locked("account temporarily locked due to failed attempts")
+	}
 	if !auth.VerifySecret(u.RecoveryHash, req.RecoveryCode) {
+		s.registerFailure(ctx, u)
 		return nil, apperr.Unauthenticated("invalid username or recovery code")
 	}
 
@@ -172,6 +177,8 @@ func (s *AuthService) Recover(ctx context.Context, req dto.RecoverRequest) (*dto
 	}
 	u.PasswordHash = passwordHash
 	u.RecoveryHash = newCodeHash
+	u.FailedAttempts = 0
+	u.LockedUntil = nil
 	if err := s.users.Update(ctx, u); err != nil {
 		return nil, apperr.Internal("recover failed")
 	}

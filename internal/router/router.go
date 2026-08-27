@@ -29,6 +29,7 @@ func New(db *gorm.DB, log *slog.Logger, production bool, modules ...Module) *gin
 
 	r := gin.New()
 	r.Use(
+		middleware.SecurityHeaders(production),
 		middleware.CORS(),
 		middleware.RequestID(),
 		middleware.Logger(log),

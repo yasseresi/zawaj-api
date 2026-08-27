@@ -63,6 +63,21 @@ func Recover(log *slog.Logger) gin.HandlerFunc {
 	}
 }
 
+// SecurityHeaders sets baseline hardening headers on every response. HSTS is
+// only sent in production (avoids pinning localhost to HTTPS during dev).
+func SecurityHeaders(production bool) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		h := c.Writer.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		if production {
+			h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		}
+		c.Next()
+	}
+}
+
 // CORS applies permissive CORS suitable for a mobile client and local dev.
 func CORS() gin.HandlerFunc {
 	return func(c *gin.Context) {

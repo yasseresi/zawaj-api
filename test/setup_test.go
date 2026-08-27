@@ -55,7 +55,7 @@ func newApp(t *testing.T) *gin.Engine {
 	guestSvc := service.NewGuestService(guestRepo, activitySvc, notifSvc)
 
 	return router.New(db, log, true,
-		handler.NewAuth(service.NewAuthService(userRepo, tokens), tokens),
+		handler.NewAuth(service.NewAuthService(userRepo, tokens, 5, time.Minute), tokens),
 		handler.NewWedding(service.NewWeddingService(weddingRepo), weddingRepo, tokens),
 		handler.NewGuest(guestSvc, activitySvc, weddingRepo, tokens),
 		handler.NewActivity(activitySvc, weddingRepo, tokens),

@@ -55,7 +55,7 @@ func main() {
 	notifSvc := service.NewNotificationService(notifRepo, weddingRepo, log)
 	guestSvc := service.NewGuestService(guestRepo, activitySvc, notifSvc)
 
-	authModule := handler.NewAuth(service.NewAuthService(userRepo, tokens), tokens)
+	authModule := handler.NewAuth(service.NewAuthService(userRepo, tokens, cfg.LoginMaxAttempts, cfg.LoginLockout), tokens)
 	weddingModule := handler.NewWedding(service.NewWeddingService(weddingRepo), weddingRepo, tokens)
 	guestModule := handler.NewGuest(guestSvc, activitySvc, weddingRepo, tokens)
 	activityModule := handler.NewActivity(activitySvc, weddingRepo, tokens)

@@ -2,7 +2,6 @@ package models
 
 import (
 	"database/sql/driver"
-	"errors"
 	"fmt"
 )
 
@@ -30,7 +29,7 @@ func (j *JSON) Scan(src any) error {
 	case string:
 		*j = []byte(v)
 	default:
-		return errors.New(fmt.Sprintf("JSON.Scan: unsupported type %T", src))
+		return fmt.Errorf("JSON.Scan: unsupported type %T", src)
 	}
 	return nil
 }

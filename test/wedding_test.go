@@ -5,6 +5,29 @@ import (
 	"testing"
 )
 
+// Accepting a lower-role link must not downgrade an existing higher role.
+func TestInviteNoDowngrade(t *testing.T) {
+	e := newApp(t)
+	sarah, _ := register(t, e, "sarah")
+	omar, _ := register(t, e, "omar")
+	wid := createWedding(t, e, sarah, "L&O")
+
+	joinAs(t, e, sarah, wid, "editor", omar) // omar becomes editor
+
+	// omar opens a viewer link — should stay editor, not drop to viewer.
+	_, lb := do(t, e, "POST", "/api/v1/weddings/"+wid+"/invite-links", sarah, map[string]any{"role": "viewer"})
+	tok, _ := dataOf(lb)["token"].(string)
+	_, ab := do(t, e, "POST", "/api/v1/invite/"+tok+"/accept", omar, nil)
+	if dataOf(ab)["role"] != "editor" {
+		t.Fatalf("accept viewer link as editor: want role editor kept, got %v", dataOf(ab)["role"])
+	}
+	// Confirm via /me role on the wedding.
+	_, wb := do(t, e, "GET", "/api/v1/weddings/"+wid, omar, nil)
+	if dataOf(wb)["my_role"] != "editor" {
+		t.Fatalf("wedding my_role: want editor, got %v", dataOf(wb)["my_role"])
+	}
+}
+
 func TestWeddingAndRoles(t *testing.T) {
 	e := newApp(t)
 	sarah, _ := register(t, e, "sarah")

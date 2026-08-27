@@ -165,10 +165,12 @@ func (s *WeddingService) AcceptInvite(ctx context.Context, tok string, userID uu
 	if err != nil {
 		return nil, err
 	}
-	// Do not clobber an owner's role with a link role.
-	if existing, gerr := s.weddings.GetRole(ctx, l.WeddingID, userID); gerr == nil && existing == models.RoleOwner {
+	// Never downgrade an existing membership: if the caller already holds a role
+	// at least as high as the link's, keep it (owner accepting a viewer link, an
+	// editor re-opening a viewer link, etc.).
+	if existing, gerr := s.weddings.GetRole(ctx, l.WeddingID, userID); gerr == nil && existing.Rank() >= l.Role.Rank() {
 		w, _ := s.weddings.ByID(ctx, l.WeddingID)
-		return &InvitePreview{WeddingID: l.WeddingID, WeddingName: name(w), Role: models.RoleOwner}, nil
+		return &InvitePreview{WeddingID: l.WeddingID, WeddingName: name(w), Role: existing}, nil
 	}
 	if err := s.weddings.UpsertMembership(ctx, l.WeddingID, userID, l.Role); err != nil {
 		return nil, apperr.Internal("join failed")

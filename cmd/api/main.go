@@ -15,7 +15,6 @@ import (
 	"zawaj/internal/auth"
 	"zawaj/internal/config"
 	"zawaj/internal/database"
-	"zawaj/internal/events"
 	"zawaj/internal/handler"
 	"zawaj/internal/repository"
 	"zawaj/internal/router"
@@ -49,15 +48,25 @@ func main() {
 	guestRepo := repository.NewGuestRepo(db)
 	activityRepo := repository.NewActivityRepo(db)
 
+	notifRepo := repository.NewNotificationRepo(db)
+	statsRepo := repository.NewStatsRepo(db)
+
 	activitySvc := service.NewActivityService(activityRepo, log)
-	// Notifier stays a no-op until the notifications module lands (swarm).
-	guestSvc := service.NewGuestService(guestRepo, activitySvc, events.NoopNotifier{})
+	notifSvc := service.NewNotificationService(notifRepo, weddingRepo, log)
+	guestSvc := service.NewGuestService(guestRepo, activitySvc, notifSvc)
 
 	authModule := handler.NewAuth(service.NewAuthService(userRepo, tokens), tokens)
 	weddingModule := handler.NewWedding(service.NewWeddingService(weddingRepo), weddingRepo, tokens)
 	guestModule := handler.NewGuest(guestSvc, activitySvc, weddingRepo, tokens)
+	activityModule := handler.NewActivity(activitySvc, weddingRepo, tokens)
+	statsModule := handler.NewStats(service.NewStatsService(statsRepo), weddingRepo, tokens)
+	notifModule := handler.NewNotification(notifSvc, tokens)
+	exportModule := handler.NewExport(guestRepo, weddingRepo, tokens)
 
-	r := router.New(db, log, cfg.IsProduction(), authModule, weddingModule, guestModule)
+	r := router.New(db, log, cfg.IsProduction(),
+		authModule, weddingModule, guestModule,
+		activityModule, statsModule, notifModule, exportModule,
+	)
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,

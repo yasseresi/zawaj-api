@@ -15,7 +15,6 @@ import (
 
 	"zawaj/internal/auth"
 	"zawaj/internal/database"
-	"zawaj/internal/events"
 	"zawaj/internal/handler"
 	"zawaj/internal/repository"
 	"zawaj/internal/router"
@@ -49,13 +48,21 @@ func newApp(t *testing.T) *gin.Engine {
 	userRepo := repository.NewUserRepo(db)
 	weddingRepo := repository.NewWeddingRepo(db)
 	guestRepo := repository.NewGuestRepo(db)
+	notifRepo := repository.NewNotificationRepo(db)
+	statsRepo := repository.NewStatsRepo(db)
 	activitySvc := service.NewActivityService(repository.NewActivityRepo(db), log)
-	guestSvc := service.NewGuestService(guestRepo, activitySvc, events.NoopNotifier{})
+	notifSvc := service.NewNotificationService(notifRepo, weddingRepo, log)
+	guestSvc := service.NewGuestService(guestRepo, activitySvc, notifSvc)
 
-	authModule := handler.NewAuth(service.NewAuthService(userRepo, tokens), tokens)
-	weddingModule := handler.NewWedding(service.NewWeddingService(weddingRepo), weddingRepo, tokens)
-	guestModule := handler.NewGuest(guestSvc, activitySvc, weddingRepo, tokens)
-	return router.New(db, log, true, authModule, weddingModule, guestModule)
+	return router.New(db, log, true,
+		handler.NewAuth(service.NewAuthService(userRepo, tokens), tokens),
+		handler.NewWedding(service.NewWeddingService(weddingRepo), weddingRepo, tokens),
+		handler.NewGuest(guestSvc, activitySvc, weddingRepo, tokens),
+		handler.NewActivity(activitySvc, weddingRepo, tokens),
+		handler.NewStats(service.NewStatsService(statsRepo), weddingRepo, tokens),
+		handler.NewNotification(notifSvc, tokens),
+		handler.NewExport(guestRepo, weddingRepo, tokens),
+	)
 }
 
 // cleanDB truncates all tables so each test starts from empty.
@@ -65,6 +72,28 @@ func cleanDB(t *testing.T, db *gorm.DB) {
 	if err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
+}
+
+// newReq builds an HTTP request with optional JSON body and bearer token.
+func newReq(method, path, token string, body any) *http.Request {
+	var buf io.Reader
+	if body != nil {
+		b, _ := json.Marshal(body)
+		buf = bytes.NewReader(b)
+	}
+	req := httptest.NewRequest(method, path, buf)
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	return req
+}
+
+// serve runs a request through the engine and returns the raw recorder.
+func serve(e *gin.Engine, req *http.Request) *httptest.ResponseRecorder {
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	return rec
 }
 
 // do performs a JSON request against the engine and returns status + decoded body.

@@ -152,6 +152,53 @@ func (s *AuthService) Me(ctx context.Context, userID uuid.UUID) (*dto.UserRespon
 	return &resp, nil
 }
 
+// ChangePassword verifies the current password and sets a new one.
+func (s *AuthService) ChangePassword(ctx context.Context, userID uuid.UUID, req dto.ChangePasswordRequest) error {
+	u, err := s.users.ByID(ctx, userID)
+	if err != nil {
+		return apperr.NotFound("user not found")
+	}
+	if !auth.VerifySecret(u.PasswordHash, req.OldPassword) {
+		return apperr.Unauthenticated("current password is incorrect")
+	}
+	hash, err := auth.HashSecret(req.NewPassword)
+	if err != nil {
+		return apperr.Internal("change password failed")
+	}
+	u.PasswordHash = hash
+	if err := s.users.Update(ctx, u); err != nil {
+		return apperr.Internal("change password failed")
+	}
+	return nil
+}
+
+// UpdateSettings applies preference changes and returns the updated user.
+func (s *AuthService) UpdateSettings(ctx context.Context, userID uuid.UUID, req dto.UpdateSettingsRequest) (*models.User, error) {
+	u, err := s.users.ByID(ctx, userID)
+	if err != nil {
+		return nil, apperr.NotFound("user not found")
+	}
+	if req.Email != nil {
+		u.Email = req.Email
+	}
+	if req.DarkMode != nil {
+		u.DarkMode = *req.DarkMode
+	}
+	if req.NotifPush != nil {
+		u.NotifPush = *req.NotifPush
+	}
+	if req.NotifEmail != nil {
+		u.NotifEmail = *req.NotifEmail
+	}
+	if req.NotifRSVP != nil {
+		u.NotifRSVP = *req.NotifRSVP
+	}
+	if err := s.users.Update(ctx, u); err != nil {
+		return nil, apperr.Internal("update settings failed")
+	}
+	return u, nil
+}
+
 // UpdateMe edits the current user's profile.
 func (s *AuthService) UpdateMe(ctx context.Context, userID uuid.UUID, req dto.UpdateMeRequest) (*dto.UserResponse, error) {
 	u, err := s.users.ByID(ctx, userID)

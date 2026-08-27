@@ -35,6 +35,21 @@ type UpdateMeRequest struct {
 	DisplayName *string `json:"display_name" binding:"omitempty,max=80"`
 }
 
+// ChangePasswordRequest changes the password (settings screen).
+type ChangePasswordRequest struct {
+	OldPassword string `json:"old_password" binding:"required"`
+	NewPassword string `json:"new_password" binding:"required,min=8,max=72"`
+}
+
+// UpdateSettingsRequest edits preferences (settings screen). All fields optional.
+type UpdateSettingsRequest struct {
+	Email      *string `json:"email" binding:"omitempty,email,max=120"`
+	DarkMode   *bool   `json:"dark_mode"`
+	NotifPush  *bool   `json:"notif_push"`
+	NotifEmail *bool   `json:"notif_email"`
+	NotifRSVP  *bool   `json:"notif_rsvp"`
+}
+
 // UserResponse is the public view of a user.
 type UserResponse struct {
 	ID          string `json:"id"`

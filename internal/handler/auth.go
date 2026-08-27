@@ -35,6 +35,8 @@ func (h *Auth) Register(rg *gin.RouterGroup) {
 	me := rg.Group("/me", middleware.RequireAuth(h.tokens))
 	me.GET("", h.me)
 	me.PATCH("", h.updateMe)
+	me.PATCH("/password", h.changePassword)
+	me.PATCH("/settings", h.updateSettings)
 }
 
 func (h *Auth) register(c *gin.Context) {
@@ -116,4 +118,33 @@ func (h *Auth) updateMe(c *gin.Context) {
 		return
 	}
 	response.JSON(c, http.StatusOK, resp)
+}
+
+func (h *Auth) changePassword(c *gin.Context) {
+	userID, _ := middleware.UserID(c)
+	var req dto.ChangePasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		apperr.Write(c, apperr.Validation(err.Error()))
+		return
+	}
+	if err := h.svc.ChangePassword(c.Request.Context(), userID, req); err != nil {
+		apperr.Write(c, err)
+		return
+	}
+	response.JSON(c, http.StatusOK, gin.H{"changed": true})
+}
+
+func (h *Auth) updateSettings(c *gin.Context) {
+	userID, _ := middleware.UserID(c)
+	var req dto.UpdateSettingsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		apperr.Write(c, apperr.Validation(err.Error()))
+		return
+	}
+	user, err := h.svc.UpdateSettings(c.Request.Context(), userID, req)
+	if err != nil {
+		apperr.Write(c, err)
+		return
+	}
+	response.JSON(c, http.StatusOK, user)
 }

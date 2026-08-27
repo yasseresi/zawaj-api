@@ -28,7 +28,7 @@ func New(status int, code, message string) *Error {
 }
 
 // Constructors for the common cases (codes match response.Code* + SYSTEM_DESIGN §4).
-func Validation(msg string) *Error   { return New(http.StatusBadRequest, response.CodeValidation, msg) }
+func Validation(msg string) *Error { return New(http.StatusBadRequest, response.CodeValidation, msg) }
 func Unauthenticated(msg string) *Error {
 	return New(http.StatusUnauthorized, response.CodeUnauthenticated, msg)
 }
@@ -39,7 +39,9 @@ func Locked(msg string) *Error    { return New(http.StatusLocked, response.CodeL
 func RateLimited(msg string) *Error {
 	return New(http.StatusTooManyRequests, response.CodeRateLimited, msg)
 }
-func Internal(msg string) *Error { return New(http.StatusInternalServerError, response.CodeInternal, msg) }
+func Internal(msg string) *Error {
+	return New(http.StatusInternalServerError, response.CodeInternal, msg)
+}
 
 // Write maps err to the JSON envelope. Typed *Error is used as-is; anything else
 // becomes a 500 (details never leaked to the client).

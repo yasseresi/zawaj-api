@@ -27,8 +27,8 @@ type Guest struct {
 	WeddingID    uuid.UUID  `gorm:"type:uuid;not null;index:idx_guest_wedding;index:idx_guest_wedding_status,priority:1" json:"wedding_id"`
 	AddedBy      uuid.UUID  `gorm:"type:uuid;not null" json:"added_by"`
 	FullName     string     `gorm:"size:120;not null" json:"full_name"`
-	Contact      string     `gorm:"size:120" json:"contact,omitempty"`      // phone OR email
-	Relationship string     `gorm:"size:80" json:"relationship,omitempty"`  // "صديقة العروس"
+	Contact      string     `gorm:"size:120" json:"contact,omitempty"`     // phone OR email
+	Relationship string     `gorm:"size:80" json:"relationship,omitempty"` // "صديقة العروس"
 	Status       RSVPStatus `gorm:"size:12;not null;default:pending;index:idx_guest_wedding_status,priority:2" json:"status"`
 	Companions   int        `gorm:"not null;default:0" json:"companions"`
 	TableLabel   string     `gorm:"size:40" json:"table_label,omitempty"` // "طاولة رقم 4"

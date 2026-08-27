@@ -15,6 +15,7 @@ import (
 
 	"zawaj/internal/auth"
 	"zawaj/internal/database"
+	"zawaj/internal/events"
 	"zawaj/internal/handler"
 	"zawaj/internal/repository"
 	"zawaj/internal/router"
@@ -44,12 +45,17 @@ func newApp(t *testing.T) *gin.Engine {
 	cleanDB(t, db)
 
 	tokens := auth.NewManager("test-access", "test-refresh", 15*time.Minute, 720*time.Hour)
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	userRepo := repository.NewUserRepo(db)
 	weddingRepo := repository.NewWeddingRepo(db)
+	guestRepo := repository.NewGuestRepo(db)
+	activitySvc := service.NewActivityService(repository.NewActivityRepo(db), log)
+	guestSvc := service.NewGuestService(guestRepo, activitySvc, events.NoopNotifier{})
+
 	authModule := handler.NewAuth(service.NewAuthService(userRepo, tokens), tokens)
 	weddingModule := handler.NewWedding(service.NewWeddingService(weddingRepo), weddingRepo, tokens)
-	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return router.New(db, log, true, authModule, weddingModule)
+	guestModule := handler.NewGuest(guestSvc, activitySvc, weddingRepo, tokens)
+	return router.New(db, log, true, authModule, weddingModule, guestModule)
 }
 
 // cleanDB truncates all tables so each test starts from empty.
@@ -99,6 +105,27 @@ func register(t *testing.T, e *gin.Engine, username string) (access, userID stri
 		userID, _ = u["id"].(string)
 	}
 	return access, userID
+}
+
+// createWedding makes a wedding owned by token's user and returns its id.
+func createWedding(t *testing.T, e *gin.Engine, token, name string) string {
+	t.Helper()
+	code, body := do(t, e, "POST", "/api/v1/weddings", token, map[string]any{"name": name})
+	if code != 201 {
+		t.Fatalf("create wedding: want 201, got %d (%v)", code, body)
+	}
+	id, _ := dataOf(body)["id"].(string)
+	return id
+}
+
+// joinAs mints a link of the given role and has token's user accept it.
+func joinAs(t *testing.T, e *gin.Engine, ownerTok, wid, role, memberTok string) {
+	t.Helper()
+	_, lb := do(t, e, "POST", "/api/v1/weddings/"+wid+"/invite-links", ownerTok, map[string]any{"role": role})
+	tok, _ := dataOf(lb)["token"].(string)
+	if code, b := do(t, e, "POST", "/api/v1/invite/"+tok+"/accept", memberTok, nil); code != 200 {
+		t.Fatalf("join as %s: want 200, got %d (%v)", role, code, b)
+	}
 }
 
 // dataOf returns the "data" object from a response envelope.

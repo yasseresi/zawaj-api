@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: build · vet · test
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: zawaj
+          POSTGRES_PASSWORD: zawaj
+          POSTGRES_DB: zawaj_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U zawaj"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      # Integration tests in ./test read this; without it they skip.
+      TEST_DATABASE_URL: postgres://zawaj:zawaj@localhost:5432/zawaj_test?sslmode=disable
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: Verify modules tidy
+        run: |
+          go mod download
+          go mod verify
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build ./...
+
+      - name: Test (race + cover)
+        run: go test ./... -race -covermode=atomic -coverprofile=coverage.out
+
+      - name: Verify OpenAPI spec is up to date
+        run: |
+          go install github.com/swaggo/swag/cmd/swag@v1.16.4
+          swag init -g cmd/api/main.go --parseInternal --parseDependency -o docs/swagger
+          if ! git diff --quiet -- docs/swagger; then
+            echo "::error::OpenAPI spec is stale. Run 'make docs' and commit docs/swagger."
+            git diff --stat -- docs/swagger
+            exit 1
+          fi
+
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --timeout=5m

@@ -48,6 +48,7 @@ func (h *Wedding) Register(rg *gin.RouterGroup) {
 	w.GET("/members", middleware.RequireRole(h.repo, viewer), h.members)
 	w.PATCH("/members/:userId", middleware.RequireRole(h.repo, owner), h.setRole)
 	w.DELETE("/members/:userId", middleware.RequireRole(h.repo, viewer), h.removeMember)
+	w.POST("/transfer", middleware.RequireRole(h.repo, owner), h.transferOwnership)
 
 	w.POST("/invite-links", middleware.RequireRole(h.repo, owner), h.createLink)
 	w.GET("/invite-links", middleware.RequireRole(h.repo, owner), h.listLinks)
@@ -322,6 +323,39 @@ func (h *Wedding) revokeLink(c *gin.Context) {
 // @Success  200 {object} response.Envelope
 // @Failure  404 {object} response.Envelope{error=response.APIError}
 // @Router   /invite/{token} [get]
+// transferOwnership godoc
+// @Summary  Transfer ownership (owner only)
+// @Description Hands the wedding to an existing member; the new user becomes owner and the caller is demoted to editor.
+// @Tags     members
+// @Accept   json
+// @Produce  json
+// @Security BearerAuth
+// @Param    id path string true "Wedding ID"
+// @Param    body body dto.TransferOwnershipRequest true "New owner"
+// @Success  200 {object} response.Envelope{data=object} "{ transferred: true }"
+// @Failure  400 {object} response.Envelope{error=response.APIError}
+// @Failure  403 {object} response.Envelope{error=response.APIError}
+// @Failure  404 {object} response.Envelope{error=response.APIError}
+// @Router   /weddings/{id}/transfer [post]
+func (h *Wedding) transferOwnership(c *gin.Context) {
+	callerID, _ := middleware.UserID(c)
+	var req dto.TransferOwnershipRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		apperr.Write(c, apperr.Validation(err.Error()))
+		return
+	}
+	newOwner, err := uuid.Parse(req.UserID)
+	if err != nil {
+		apperr.Write(c, apperr.Validation("invalid user_id"))
+		return
+	}
+	if err := h.svc.TransferOwnership(c.Request.Context(), middleware.WeddingID(c), callerID, newOwner); err != nil {
+		apperr.Write(c, err)
+		return
+	}
+	response.JSON(c, http.StatusOK, gin.H{"transferred": true})
+}
+
 func (h *Wedding) previewInvite(c *gin.Context) {
 	p, err := h.svc.PreviewInvite(c.Request.Context(), c.Param("token"))
 	if err != nil {

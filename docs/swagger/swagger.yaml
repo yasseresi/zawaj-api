@@ -160,6 +160,13 @@ definitions:
     required:
     - status
     type: object
+  zawaj_internal_dto.TransferOwnershipRequest:
+    properties:
+      user_id:
+        type: string
+    required:
+    - user_id
+    type: object
   zawaj_internal_dto.UpdateGuestRequest:
     properties:
       companions:
@@ -456,20 +463,54 @@ paths:
       - auth
   /invite/{token}:
     get:
-      description: Returns wedding name and role for a share token before accepting.
+      consumes:
+      - application/json
+      description: |-
+        Returns wedding name and role for a share token before accepting.
+        Hands the wedding to an existing member; the new user becomes owner and the caller is demoted to editor.
       parameters:
       - description: Invite token
         in: path
         name: token
         required: true
         type: string
+      - description: New owner
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/zawaj_internal_dto.TransferOwnershipRequest'
       produces:
+      - application/json
       - application/json
       responses:
         "200":
-          description: OK
+          description: '{ transferred: true }'
           schema:
-            $ref: '#/definitions/zawaj_pkg_response.Envelope'
+            allOf:
+            - $ref: '#/definitions/zawaj_pkg_response.Envelope'
+            - properties:
+                data:
+                  type: object
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            allOf:
+            - $ref: '#/definitions/zawaj_pkg_response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/zawaj_pkg_response.APIError'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/zawaj_pkg_response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/zawaj_pkg_response.APIError'
+              type: object
         "404":
           description: Not Found
           schema:
@@ -481,9 +522,11 @@ paths:
               type: object
       security:
       - BearerAuth: []
-      summary: Preview an invite
+      - BearerAuth: []
+      summary: Transfer ownership (owner only)
       tags:
       - invites
+      - members
   /invite/{token}/accept:
     post:
       description: Joins the wedding at the link's role; never downgrades an existing
@@ -1783,6 +1826,72 @@ paths:
       summary: Guest statistics
       tags:
       - stats
+  /weddings/{id}/transfer:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Returns wedding name and role for a share token before accepting.
+        Hands the wedding to an existing member; the new user becomes owner and the caller is demoted to editor.
+      parameters:
+      - description: Wedding ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: New owner
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/zawaj_internal_dto.TransferOwnershipRequest'
+      produces:
+      - application/json
+      - application/json
+      responses:
+        "200":
+          description: '{ transferred: true }'
+          schema:
+            allOf:
+            - $ref: '#/definitions/zawaj_pkg_response.Envelope'
+            - properties:
+                data:
+                  type: object
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            allOf:
+            - $ref: '#/definitions/zawaj_pkg_response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/zawaj_pkg_response.APIError'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/zawaj_pkg_response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/zawaj_pkg_response.APIError'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/zawaj_pkg_response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/zawaj_pkg_response.APIError'
+              type: object
+      security:
+      - BearerAuth: []
+      - BearerAuth: []
+      summary: Transfer ownership (owner only)
+      tags:
+      - invites
+      - members
 securityDefinitions:
   BearerAuth:
     description: Type "Bearer" followed by a space and the access JWT.

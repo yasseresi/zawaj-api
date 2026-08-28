@@ -252,6 +252,22 @@ func (s *WeddingService) RemoveMember(ctx context.Context, weddingID, targetID u
 	return nil
 }
 
+// TransferOwnership hands the wedding to newOwnerID (an existing member), who
+// becomes owner while the current owner is demoted to editor. Owner-only action.
+func (s *WeddingService) TransferOwnership(ctx context.Context, weddingID, currentOwnerID, newOwnerID uuid.UUID) error {
+	if newOwnerID == currentOwnerID {
+		return apperr.Validation("cannot transfer ownership to yourself")
+	}
+	err := s.weddings.TransferOwnership(ctx, weddingID, currentOwnerID, newOwnerID)
+	if errors.Is(err, repository.ErrNotFound) {
+		return apperr.NotFound("target user is not a member of this wedding")
+	}
+	if err != nil {
+		return apperr.Internal("transfer ownership failed")
+	}
+	return nil
+}
+
 func parseDate(s *string) (*time.Time, error) {
 	if s == nil || *s == "" {
 		return nil, nil

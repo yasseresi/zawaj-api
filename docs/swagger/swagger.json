@@ -377,16 +377,24 @@
                 "security": [
                     {
                         "BearerAuth": []
+                    },
+                    {
+                        "BearerAuth": []
                     }
                 ],
-                "description": "Returns wedding name and role for a share token before accepting.",
+                "description": "Returns wedding name and role for a share token before accepting.\nHands the wedding to an existing member; the new user becomes owner and the caller is demoted to editor.",
+                "consumes": [
+                    "application/json"
+                ],
                 "produces": [
+                    "application/json",
                     "application/json"
                 ],
                 "tags": [
-                    "invites"
+                    "invites",
+                    "members"
                 ],
-                "summary": "Preview an invite",
+                "summary": "Transfer ownership (owner only)",
                 "parameters": [
                     {
                         "type": "string",
@@ -394,13 +402,70 @@
                         "name": "token",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "description": "New owner",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/zawaj_internal_dto.TransferOwnershipRequest"
+                        }
                     }
                 ],
                 "responses": {
                     "200": {
-                        "description": "OK",
+                        "description": "{ transferred: true }",
                         "schema": {
-                            "$ref": "#/definitions/zawaj_pkg_response.Envelope"
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/zawaj_pkg_response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/zawaj_pkg_response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/zawaj_pkg_response.APIError"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/zawaj_pkg_response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/zawaj_pkg_response.APIError"
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     },
                     "404": {
@@ -2775,6 +2840,123 @@
                     }
                 }
             }
+        },
+        "/weddings/{id}/transfer": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns wedding name and role for a share token before accepting.\nHands the wedding to an existing member; the new user becomes owner and the caller is demoted to editor.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json",
+                    "application/json"
+                ],
+                "tags": [
+                    "invites",
+                    "members"
+                ],
+                "summary": "Transfer ownership (owner only)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Wedding ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "New owner",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/zawaj_internal_dto.TransferOwnershipRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "{ transferred: true }",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/zawaj_pkg_response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/zawaj_pkg_response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/zawaj_pkg_response.APIError"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/zawaj_pkg_response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/zawaj_pkg_response.APIError"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/zawaj_pkg_response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/zawaj_pkg_response.APIError"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
@@ -3004,6 +3186,17 @@
                         "confirmed",
                         "declined"
                     ]
+                }
+            }
+        },
+        "zawaj_internal_dto.TransferOwnershipRequest": {
+            "type": "object",
+            "required": [
+                "user_id"
+            ],
+            "properties": {
+                "user_id": {
+                    "type": "string"
                 }
             }
         },

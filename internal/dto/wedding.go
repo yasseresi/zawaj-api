@@ -23,3 +23,8 @@ type CreateInviteLinkRequest struct {
 type SetRoleRequest struct {
 	Role string `json:"role" binding:"required,oneof=editor viewer"`
 }
+
+// TransferOwnershipRequest names the member who becomes the new owner.
+type TransferOwnershipRequest struct {
+	UserID string `json:"user_id" binding:"required,uuid"`
+}

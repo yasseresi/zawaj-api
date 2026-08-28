@@ -175,6 +175,38 @@ func (r *WeddingRepo) RemoveMember(ctx context.Context, weddingID, userID uuid.U
 	return nil
 }
 
+// TransferOwnership atomically hands a wedding to newOwnerID: it flips the
+// wedding's owner_id, promotes the new owner's membership to owner, and demotes
+// the previous owner to editor. newOwnerID must already be a member (ErrNotFound
+// otherwise). All four writes happen in one transaction.
+func (r *WeddingRepo) TransferOwnership(ctx context.Context, weddingID, currentOwnerID, newOwnerID uuid.UUID) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// New owner must be an existing member.
+		var target models.Membership
+		err := tx.Where("wedding_id = ? AND user_id = ?", weddingID, newOwnerID).First(&target).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+
+		if err := tx.Model(&models.Wedding{}).
+			Where("id = ?", weddingID).
+			Update("owner_id", newOwnerID).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&models.Membership{}).
+			Where("wedding_id = ? AND user_id = ?", weddingID, newOwnerID).
+			Update("role", models.RoleOwner).Error; err != nil {
+			return err
+		}
+		return tx.Model(&models.Membership{}).
+			Where("wedding_id = ? AND user_id = ?", weddingID, currentOwnerID).
+			Update("role", models.RoleEditor).Error
+	})
+}
+
 // CountByRole counts members of a wedding holding a given role.
 func (r *WeddingRepo) CountByRole(ctx context.Context, weddingID uuid.UUID, role models.Role) (int64, error) {
 	var n int64

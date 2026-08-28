@@ -89,3 +89,46 @@ func TestWeddingAndRoles(t *testing.T) {
 		}
 	}
 }
+
+// Transferring ownership promotes the target member to owner and demotes the
+// previous owner to editor; guards reject self-transfer, non-members, and
+// non-owner callers.
+func TestTransferOwnership(t *testing.T) {
+	e := newApp(t)
+	sarah, sarahID := register(t, e, "sarah_t")
+	omar, omarID := register(t, e, "omar_t")
+	nour, nourID := register(t, e, "nour_t")
+	wid := createWedding(t, e, sarah, "Transfer")
+
+	joinAs(t, e, sarah, wid, "editor", omar) // omar is an editor member
+
+	// Non-owner cannot transfer.
+	if code, _ := do(t, e, "POST", "/api/v1/weddings/"+wid+"/transfer", omar, map[string]any{"user_id": sarahID}); code != http.StatusForbidden {
+		t.Fatalf("editor transfer: want 403, got %d", code)
+	}
+	// Cannot transfer to self.
+	if code, _ := do(t, e, "POST", "/api/v1/weddings/"+wid+"/transfer", sarah, map[string]any{"user_id": sarahID}); code != http.StatusBadRequest {
+		t.Fatalf("self transfer: want 400, got %d", code)
+	}
+	// Cannot transfer to a non-member.
+	if code, _ := do(t, e, "POST", "/api/v1/weddings/"+wid+"/transfer", sarah, map[string]any{"user_id": nourID}); code != http.StatusNotFound {
+		t.Fatalf("non-member transfer: want 404, got %d", code)
+	}
+	_ = nour
+
+	// Valid transfer to omar.
+	if code, _ := do(t, e, "POST", "/api/v1/weddings/"+wid+"/transfer", sarah, map[string]any{"user_id": omarID}); code != http.StatusOK {
+		t.Fatalf("transfer: want 200, got %d", code)
+	}
+	// omar is now owner.
+	if _, wb := do(t, e, "GET", "/api/v1/weddings/"+wid, omar, nil); dataOf(wb)["my_role"] != "owner" {
+		t.Fatalf("new owner role: want owner, got %v", dataOf(wb)["my_role"])
+	}
+	// sarah is now editor (demoted), and can no longer transfer.
+	if _, wb := do(t, e, "GET", "/api/v1/weddings/"+wid, sarah, nil); dataOf(wb)["my_role"] != "editor" {
+		t.Fatalf("old owner role: want editor, got %v", dataOf(wb)["my_role"])
+	}
+	if code, _ := do(t, e, "POST", "/api/v1/weddings/"+wid+"/transfer", sarah, map[string]any{"user_id": omarID}); code != http.StatusForbidden {
+		t.Fatalf("demoted owner transfer: want 403, got %d", code)
+	}
+}

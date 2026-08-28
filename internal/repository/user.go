@@ -64,3 +64,30 @@ func (r *UserRepo) ExistsByUsername(ctx context.Context, username string) (bool,
 func (r *UserRepo) Update(ctx context.Context, u *models.User) error {
 	return r.db.WithContext(ctx).Save(u).Error
 }
+
+// DeleteWithOwnedData hard-deletes a user and cascade-deletes every wedding they
+// own (guests, notes, activity, invite links, memberships), removes their
+// memberships in others' weddings, and their notifications. Rows they authored
+// in other people's weddings (added_by/author_id/actor_id) are left as harmless
+// orphan uuids. Runs in one transaction.
+func (r *UserRepo) DeleteWithOwnedData(ctx context.Context, userID uuid.UUID) error {
+	const owned = "SELECT id FROM weddings WHERE owner_id = ?"
+	stmts := []string{
+		"DELETE FROM guest_notes WHERE guest_id IN (SELECT id FROM guests WHERE wedding_id IN (" + owned + "))",
+		"DELETE FROM guests WHERE wedding_id IN (" + owned + ")",
+		"DELETE FROM activity_logs WHERE wedding_id IN (" + owned + ")",
+		"DELETE FROM invite_links WHERE wedding_id IN (" + owned + ")",
+		"DELETE FROM memberships WHERE wedding_id IN (" + owned + ")",
+		"DELETE FROM weddings WHERE owner_id = ?",
+		"DELETE FROM memberships WHERE user_id = ?",
+		"DELETE FROM notifications WHERE user_id = ?",
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, q := range stmts {
+			if err := tx.Exec(q, userID).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Delete(&models.User{}, "id = ?", userID).Error
+	})
+}

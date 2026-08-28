@@ -5,6 +5,34 @@ import (
 	"testing"
 )
 
+func TestDeleteAccount(t *testing.T) {
+	e := newApp(t)
+	sarah, _ := register(t, e, "sarah")
+	omar, _ := register(t, e, "omar")
+	wid := createWedding(t, e, sarah, "L&O")
+	do(t, e, http.MethodPost, "/api/v1/weddings/"+wid+"/guests", sarah, map[string]any{"full_name": "A"})
+	joinAs(t, e, sarah, wid, "editor", omar) // omar collaborates
+
+	// Sarah deletes her account.
+	if code, _ := do(t, e, http.MethodDelete, "/api/v1/me", sarah, nil); code != http.StatusOK {
+		t.Fatalf("delete account: want 200, got %d", code)
+	}
+	// Her login no longer works.
+	if code, _ := do(t, e, http.MethodPost, "/api/v1/auth/login", "", map[string]any{
+		"username": "sarah", "password": "password123",
+	}); code != http.StatusUnauthorized {
+		t.Fatalf("login after delete: want 401, got %d", code)
+	}
+	// Her owned wedding is gone — omar (former editor) now gets 404.
+	if code, _ := do(t, e, http.MethodGet, "/api/v1/weddings/"+wid, omar, nil); code != http.StatusNotFound {
+		t.Fatalf("wedding after owner delete: want 404, got %d", code)
+	}
+	// Omar's own account is untouched.
+	if code, _ := do(t, e, http.MethodGet, "/api/v1/me", omar, nil); code != http.StatusOK {
+		t.Fatalf("collaborator account: want 200, got %d", code)
+	}
+}
+
 func TestAccountSettings(t *testing.T) {
 	e := newApp(t)
 	tok, _ := register(t, e, "sarah")

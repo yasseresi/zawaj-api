@@ -190,6 +190,15 @@ func (s *AuthService) Recover(ctx context.Context, req dto.RecoverRequest) (*dto
 	return &dto.AuthResponse{Access: pair.Access, Refresh: pair.Refresh, RecoveryCode: newCode}, nil
 }
 
+// DeleteAccount hard-deletes the current user and cascade-deletes the weddings
+// they own.
+func (s *AuthService) DeleteAccount(ctx context.Context, userID uuid.UUID) error {
+	if err := s.users.DeleteWithOwnedData(ctx, userID); err != nil {
+		return apperr.Internal("delete account failed")
+	}
+	return nil
+}
+
 // Me returns the current user.
 func (s *AuthService) Me(ctx context.Context, userID uuid.UUID) (*dto.UserResponse, error) {
 	u, err := s.users.ByID(ctx, userID)

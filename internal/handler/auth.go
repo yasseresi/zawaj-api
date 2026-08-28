@@ -37,6 +37,7 @@ func (h *Auth) Register(rg *gin.RouterGroup) {
 	me.PATCH("", h.updateMe)
 	me.PATCH("/password", h.changePassword)
 	me.PATCH("/settings", h.updateSettings)
+	me.DELETE("", h.deleteMe)
 }
 
 func (h *Auth) register(c *gin.Context) {
@@ -132,6 +133,15 @@ func (h *Auth) changePassword(c *gin.Context) {
 		return
 	}
 	response.JSON(c, http.StatusOK, gin.H{"changed": true})
+}
+
+func (h *Auth) deleteMe(c *gin.Context) {
+	userID, _ := middleware.UserID(c)
+	if err := h.svc.DeleteAccount(c.Request.Context(), userID); err != nil {
+		apperr.Write(c, err)
+		return
+	}
+	response.JSON(c, http.StatusOK, gin.H{"deleted": true})
 }
 
 func (h *Auth) updateSettings(c *gin.Context) {

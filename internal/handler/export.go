@@ -2,13 +2,14 @@ package handler
 
 import (
 	"encoding/csv"
+	"net/http"
 	"strconv"
 
-	"zawaj/internal/apperr"
 	"zawaj/internal/auth"
 	"zawaj/internal/middleware"
 	"zawaj/internal/models"
 	"zawaj/internal/repository"
+	"zawaj/pkg/response"
 
 	"github.com/gin-gonic/gin"
 )
@@ -37,12 +38,23 @@ func (h *Export) Register(rg *gin.RouterGroup) {
 
 // guestsCSV streams all guests of the wedding as a UTF-8 CSV with a BOM so
 // Excel renders Arabic text correctly.
+//
+// guestsCSV godoc
+// @Summary  Export guests as CSV
+// @Description UTF-8 CSV (with BOM for Excel/Arabic). Any member may download.
+// @Tags     export
+// @Produce  text/csv
+// @Security BearerAuth
+// @Param    id path string true "Wedding ID"
+// @Success  200 {string} string "CSV file"
+// @Failure  403 {object} response.Envelope{error=response.APIError}
+// @Router   /weddings/{id}/export.csv [get]
 func (h *Export) guestsCSV(c *gin.Context) {
 	guests, err := h.guests.List(c.Request.Context(), middleware.WeddingID(c), repository.GuestFilter{
 		Limit: 10000,
 	})
 	if err != nil {
-		apperr.Write(c, err)
+		response.Error(c, http.StatusInternalServerError, response.CodeInternal, "export failed")
 		return
 	}
 

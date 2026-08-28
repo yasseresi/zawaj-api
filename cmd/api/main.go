@@ -1,5 +1,23 @@
 // Command api is the Zawaj backend entrypoint: load config, connect the database,
 // build the router, and serve HTTP with graceful shutdown.
+//
+// @title           Zawaj API
+// @version         1.0
+// @description     Wedding guest-list backend. Collaborative RSVP management with
+// @description     role-based access (owner/editor/viewer), invite links, stats,
+// @description     activity feed, notifications, and CSV export.
+// @description
+// @description     All responses use the envelope `{ "data": ..., "error": null }`.
+// @description     On error, `data` is null and `error` is `{ "code", "message", "details" }`.
+// @description     Authenticate via `POST /auth/login`, then send `Authorization: Bearer <access>`.
+//
+// @contact.name    Zawaj
+// @BasePath        /api/v1
+//
+// @securityDefinitions.apikey  BearerAuth
+// @in                          header
+// @name                        Authorization
+// @description                 Type "Bearer" followed by a space and the access JWT.
 package main
 
 import (
@@ -19,6 +37,11 @@ import (
 	"zawaj/internal/repository"
 	"zawaj/internal/router"
 	"zawaj/internal/service"
+
+	_ "zawaj/docs/swagger" // generated OpenAPI spec (swag init)
+
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
 func main() {
@@ -67,6 +90,13 @@ func main() {
 		authModule, weddingModule, guestModule,
 		activityModule, statsModule, notifModule, exportModule,
 	)
+
+	// Swagger UI at /swagger/index.html. Off in production unless ENABLE_SWAGGER=true,
+	// so the API surface isn't advertised on public deployments by default.
+	if !cfg.IsProduction() || os.Getenv("ENABLE_SWAGGER") == "true" {
+		r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+		log.Info("swagger UI enabled", "url", "/swagger/index.html")
+	}
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,

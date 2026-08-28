@@ -40,6 +40,17 @@ func (h *Auth) Register(rg *gin.RouterGroup) {
 	me.DELETE("", h.deleteMe)
 }
 
+// register godoc
+// @Summary  Register a new account
+// @Description Creates a user and returns tokens plus a one-time recovery code (shown once).
+// @Tags     auth
+// @Accept   json
+// @Produce  json
+// @Param    body body dto.RegisterRequest true "Registration"
+// @Success  201 {object} response.Envelope{data=dto.AuthResponse}
+// @Failure  400 {object} response.Envelope{error=response.APIError}
+// @Failure  409 {object} response.Envelope{error=response.APIError}
+// @Router   /auth/register [post]
 func (h *Auth) register(c *gin.Context) {
 	var req dto.RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -54,6 +65,17 @@ func (h *Auth) register(c *gin.Context) {
 	response.JSON(c, http.StatusCreated, resp)
 }
 
+// login godoc
+// @Summary  Log in
+// @Tags     auth
+// @Accept   json
+// @Produce  json
+// @Param    body body dto.LoginRequest true "Credentials"
+// @Success  200 {object} response.Envelope{data=dto.AuthResponse}
+// @Failure  400 {object} response.Envelope{error=response.APIError}
+// @Failure  401 {object} response.Envelope{error=response.APIError}
+// @Failure  423 {object} response.Envelope{error=response.APIError} "Account locked (too many attempts)"
+// @Router   /auth/login [post]
 func (h *Auth) login(c *gin.Context) {
 	var req dto.LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -68,6 +90,16 @@ func (h *Auth) login(c *gin.Context) {
 	response.JSON(c, http.StatusOK, resp)
 }
 
+// refresh godoc
+// @Summary  Refresh token pair
+// @Tags     auth
+// @Accept   json
+// @Produce  json
+// @Param    body body dto.RefreshRequest true "Refresh token"
+// @Success  200 {object} response.Envelope{data=dto.AuthResponse}
+// @Failure  400 {object} response.Envelope{error=response.APIError}
+// @Failure  401 {object} response.Envelope{error=response.APIError}
+// @Router   /auth/refresh [post]
 func (h *Auth) refresh(c *gin.Context) {
 	var req dto.RefreshRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -82,6 +114,18 @@ func (h *Auth) refresh(c *gin.Context) {
 	response.JSON(c, http.StatusOK, resp)
 }
 
+// recover godoc
+// @Summary  Recover account with one-time code
+// @Description Resets the password using the recovery code issued at registration; returns a fresh code.
+// @Tags     auth
+// @Accept   json
+// @Produce  json
+// @Param    body body dto.RecoverRequest true "Recovery"
+// @Success  200 {object} response.Envelope{data=dto.AuthResponse}
+// @Failure  400 {object} response.Envelope{error=response.APIError}
+// @Failure  401 {object} response.Envelope{error=response.APIError}
+// @Failure  423 {object} response.Envelope{error=response.APIError} "Locked (too many attempts)"
+// @Router   /auth/recover [post]
 func (h *Auth) recover(c *gin.Context) {
 	var req dto.RecoverRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -96,6 +140,14 @@ func (h *Auth) recover(c *gin.Context) {
 	response.JSON(c, http.StatusOK, resp)
 }
 
+// me godoc
+// @Summary  Get current user
+// @Tags     me
+// @Produce  json
+// @Security BearerAuth
+// @Success  200 {object} response.Envelope{data=dto.UserResponse}
+// @Failure  401 {object} response.Envelope{error=response.APIError}
+// @Router   /me [get]
 func (h *Auth) me(c *gin.Context) {
 	userID, _ := middleware.UserID(c)
 	resp, err := h.svc.Me(c.Request.Context(), userID)
@@ -106,6 +158,17 @@ func (h *Auth) me(c *gin.Context) {
 	response.JSON(c, http.StatusOK, resp)
 }
 
+// updateMe godoc
+// @Summary  Update current user profile
+// @Tags     me
+// @Accept   json
+// @Produce  json
+// @Security BearerAuth
+// @Param    body body dto.UpdateMeRequest true "Profile fields"
+// @Success  200 {object} response.Envelope{data=dto.UserResponse}
+// @Failure  400 {object} response.Envelope{error=response.APIError}
+// @Failure  401 {object} response.Envelope{error=response.APIError}
+// @Router   /me [patch]
 func (h *Auth) updateMe(c *gin.Context) {
 	userID, _ := middleware.UserID(c)
 	var req dto.UpdateMeRequest
@@ -121,6 +184,17 @@ func (h *Auth) updateMe(c *gin.Context) {
 	response.JSON(c, http.StatusOK, resp)
 }
 
+// changePassword godoc
+// @Summary  Change password
+// @Tags     me
+// @Accept   json
+// @Produce  json
+// @Security BearerAuth
+// @Param    body body dto.ChangePasswordRequest true "Old and new password"
+// @Success  200 {object} response.Envelope{data=object} "{ changed: true }"
+// @Failure  400 {object} response.Envelope{error=response.APIError}
+// @Failure  401 {object} response.Envelope{error=response.APIError}
+// @Router   /me/password [patch]
 func (h *Auth) changePassword(c *gin.Context) {
 	userID, _ := middleware.UserID(c)
 	var req dto.ChangePasswordRequest
@@ -135,6 +209,15 @@ func (h *Auth) changePassword(c *gin.Context) {
 	response.JSON(c, http.StatusOK, gin.H{"changed": true})
 }
 
+// deleteMe godoc
+// @Summary  Delete account
+// @Description Permanently deletes the account and cascades all owned weddings and their data.
+// @Tags     me
+// @Produce  json
+// @Security BearerAuth
+// @Success  200 {object} response.Envelope{data=object} "{ deleted: true }"
+// @Failure  401 {object} response.Envelope{error=response.APIError}
+// @Router   /me [delete]
 func (h *Auth) deleteMe(c *gin.Context) {
 	userID, _ := middleware.UserID(c)
 	if err := h.svc.DeleteAccount(c.Request.Context(), userID); err != nil {
@@ -144,6 +227,17 @@ func (h *Auth) deleteMe(c *gin.Context) {
 	response.JSON(c, http.StatusOK, gin.H{"deleted": true})
 }
 
+// updateSettings godoc
+// @Summary  Update settings/preferences
+// @Tags     me
+// @Accept   json
+// @Produce  json
+// @Security BearerAuth
+// @Param    body body dto.UpdateSettingsRequest true "Settings"
+// @Success  200 {object} response.Envelope{data=object}
+// @Failure  400 {object} response.Envelope{error=response.APIError}
+// @Failure  401 {object} response.Envelope{error=response.APIError}
+// @Router   /me/settings [patch]
 func (h *Auth) updateSettings(c *gin.Context) {
 	userID, _ := middleware.UserID(c)
 	var req dto.UpdateSettingsRequest

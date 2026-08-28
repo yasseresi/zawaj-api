@@ -34,6 +34,16 @@ func (h *Stats) Register(rg *gin.RouterGroup) {
 	g.GET("", middleware.RequireRole(h.repo, viewer), h.get)
 }
 
+// get godoc
+// @Summary  Guest statistics
+// @Description Counts by RSVP status, companions, and totals for a wedding.
+// @Tags     stats
+// @Produce  json
+// @Security BearerAuth
+// @Param    id path string true "Wedding ID"
+// @Success  200 {object} response.Envelope
+// @Failure  403 {object} response.Envelope{error=response.APIError}
+// @Router   /weddings/{id}/stats [get]
 func (h *Stats) get(c *gin.Context) {
 	res, err := h.svc.Guests(c.Request.Context(), middleware.WeddingID(c))
 	if err != nil {

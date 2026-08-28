@@ -45,6 +45,19 @@ func (h *Guest) Register(rg *gin.RouterGroup) {
 	g.PATCH("/:gid/status", middleware.RequireRole(h.repo, editor), h.setStatus)
 }
 
+// list godoc
+// @Summary  List guests
+// @Tags     guests
+// @Produce  json
+// @Security BearerAuth
+// @Param    id path string true "Wedding ID"
+// @Param    status query string false "Filter by status" Enums(pending,confirmed,declined)
+// @Param    q query string false "Search full name/contact"
+// @Param    page query int false "Page (default 1)"
+// @Param    page_size query int false "Page size (default 50, max 200)"
+// @Success  200 {object} response.Envelope
+// @Failure  403 {object} response.Envelope{error=response.APIError}
+// @Router   /weddings/{id}/guests [get]
 func (h *Guest) list(c *gin.Context) {
 	page, size := paging(c)
 	f := repository.GuestFilter{
@@ -61,6 +74,18 @@ func (h *Guest) list(c *gin.Context) {
 	response.JSON(c, http.StatusOK, res)
 }
 
+// create godoc
+// @Summary  Add a guest (editor+)
+// @Tags     guests
+// @Accept   json
+// @Produce  json
+// @Security BearerAuth
+// @Param    id path string true "Wedding ID"
+// @Param    body body dto.CreateGuestRequest true "Guest"
+// @Success  201 {object} response.Envelope
+// @Failure  400 {object} response.Envelope{error=response.APIError}
+// @Failure  403 {object} response.Envelope{error=response.APIError}
+// @Router   /weddings/{id}/guests [post]
 func (h *Guest) create(c *gin.Context) {
 	actor, _ := middleware.UserID(c)
 	var req dto.CreateGuestRequest
@@ -76,6 +101,17 @@ func (h *Guest) create(c *gin.Context) {
 	response.JSON(c, http.StatusCreated, g)
 }
 
+// get godoc
+// @Summary  Get a guest with notes and history
+// @Tags     guests
+// @Produce  json
+// @Security BearerAuth
+// @Param    id path string true "Wedding ID"
+// @Param    gid path string true "Guest ID"
+// @Success  200 {object} response.Envelope{data=object} "{ guest, notes, history }"
+// @Failure  403 {object} response.Envelope{error=response.APIError}
+// @Failure  404 {object} response.Envelope{error=response.APIError}
+// @Router   /weddings/{id}/guests/{gid} [get]
 func (h *Guest) get(c *gin.Context) {
 	gid, ok := guestID(c)
 	if !ok {
@@ -92,6 +128,20 @@ func (h *Guest) get(c *gin.Context) {
 	})
 }
 
+// update godoc
+// @Summary  Update a guest (editor+)
+// @Tags     guests
+// @Accept   json
+// @Produce  json
+// @Security BearerAuth
+// @Param    id path string true "Wedding ID"
+// @Param    gid path string true "Guest ID"
+// @Param    body body dto.UpdateGuestRequest true "Fields"
+// @Success  200 {object} response.Envelope
+// @Failure  400 {object} response.Envelope{error=response.APIError}
+// @Failure  403 {object} response.Envelope{error=response.APIError}
+// @Failure  404 {object} response.Envelope{error=response.APIError}
+// @Router   /weddings/{id}/guests/{gid} [patch]
 func (h *Guest) update(c *gin.Context) {
 	gid, ok := guestID(c)
 	if !ok {
@@ -111,6 +161,17 @@ func (h *Guest) update(c *gin.Context) {
 	response.JSON(c, http.StatusOK, g)
 }
 
+// remove godoc
+// @Summary  Delete a guest (editor+)
+// @Tags     guests
+// @Produce  json
+// @Security BearerAuth
+// @Param    id path string true "Wedding ID"
+// @Param    gid path string true "Guest ID"
+// @Success  200 {object} response.Envelope{data=object} "{ deleted: true }"
+// @Failure  403 {object} response.Envelope{error=response.APIError}
+// @Failure  404 {object} response.Envelope{error=response.APIError}
+// @Router   /weddings/{id}/guests/{gid} [delete]
 func (h *Guest) remove(c *gin.Context) {
 	gid, ok := guestID(c)
 	if !ok {
@@ -123,6 +184,19 @@ func (h *Guest) remove(c *gin.Context) {
 	response.JSON(c, http.StatusOK, gin.H{"deleted": true})
 }
 
+// addNote godoc
+// @Summary  Add a note to a guest (editor+)
+// @Tags     guests
+// @Accept   json
+// @Produce  json
+// @Security BearerAuth
+// @Param    id path string true "Wedding ID"
+// @Param    gid path string true "Guest ID"
+// @Param    body body dto.AddNoteRequest true "Note body"
+// @Success  201 {object} response.Envelope
+// @Failure  400 {object} response.Envelope{error=response.APIError}
+// @Failure  403 {object} response.Envelope{error=response.APIError}
+// @Router   /weddings/{id}/guests/{gid}/notes [post]
 func (h *Guest) addNote(c *gin.Context) {
 	gid, ok := guestID(c)
 	if !ok {
@@ -142,6 +216,19 @@ func (h *Guest) addNote(c *gin.Context) {
 	response.JSON(c, http.StatusCreated, n)
 }
 
+// setStatus godoc
+// @Summary  Set a guest's RSVP status (editor+)
+// @Tags     guests
+// @Accept   json
+// @Produce  json
+// @Security BearerAuth
+// @Param    id path string true "Wedding ID"
+// @Param    gid path string true "Guest ID"
+// @Param    body body dto.SetStatusRequest true "Status"
+// @Success  200 {object} response.Envelope
+// @Failure  400 {object} response.Envelope{error=response.APIError}
+// @Failure  403 {object} response.Envelope{error=response.APIError}
+// @Router   /weddings/{id}/guests/{gid}/status [patch]
 func (h *Guest) setStatus(c *gin.Context) {
 	gid, ok := guestID(c)
 	if !ok {

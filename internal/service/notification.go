@@ -4,14 +4,20 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"time"
 
 	"zawaj/internal/apperr"
 	"zawaj/internal/events"
 	"zawaj/internal/models"
+	"zawaj/internal/push"
 	"zawaj/internal/repository"
 
 	"github.com/google/uuid"
 )
+
+// pushTimeout bounds a fan-out's push delivery, which runs detached from the
+// originating request so a slow FCM call never delays the API response.
+const pushTimeout = 10 * time.Second
 
 // NotificationService fans out and reads personal notifications. It implements
 // events.Notifier so producer services (guests, members) can emit notifications
@@ -19,12 +25,15 @@ import (
 type NotificationService struct {
 	notifs   *repository.NotificationRepo
 	weddings *repository.WeddingRepo
+	devices  *repository.DeviceTokenRepo
+	pusher   push.Sender
 	log      *slog.Logger
 }
 
-// NewNotificationService builds the service.
-func NewNotificationService(notifs *repository.NotificationRepo, weddings *repository.WeddingRepo, log *slog.Logger) *NotificationService {
-	return &NotificationService{notifs: notifs, weddings: weddings, log: log}
+// NewNotificationService builds the service. devices and pusher power FCM push;
+// pass a push.Noop when push is disabled.
+func NewNotificationService(notifs *repository.NotificationRepo, weddings *repository.WeddingRepo, devices *repository.DeviceTokenRepo, pusher push.Sender, log *slog.Logger) *NotificationService {
+	return &NotificationService{notifs: notifs, weddings: weddings, devices: devices, pusher: pusher, log: log}
 }
 
 // Notify fans a note out to every member of its wedding except the actor,
@@ -38,10 +47,12 @@ func (s *NotificationService) Notify(ctx context.Context, n events.Note) {
 	}
 	weddingID := n.WeddingID
 	rows := make([]models.Notification, 0, len(members))
+	recipients := make([]uuid.UUID, 0, len(members))
 	for _, m := range members {
 		if m.UserID == n.ActorID {
 			continue
 		}
+		recipients = append(recipients, m.UserID)
 		rows = append(rows, models.Notification{
 			UserID:    m.UserID,
 			WeddingID: &weddingID,
@@ -56,7 +67,40 @@ func (s *NotificationService) Notify(ctx context.Context, n events.Note) {
 	}
 	if err := s.notifs.CreateBatch(ctx, rows); err != nil {
 		s.log.Error("notify: create notifications failed", "error", err, "wedding_id", n.WeddingID, "type", n.Type)
+		return
 	}
+
+	s.pushToDevices(recipients, n)
+}
+
+// pushToDevices delivers a fan-out as FCM push to recipients who have push
+// enabled. It runs detached from the request (its own timeout) and prunes tokens
+// FCM reports as invalid. Best-effort: failures are logged, never surfaced.
+func (s *NotificationService) pushToDevices(recipients []uuid.UUID, n events.Note) {
+	if s.pusher == nil || s.devices == nil || len(recipients) == 0 {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), pushTimeout)
+		defer cancel()
+
+		tokens, err := s.devices.TokensForUsers(ctx, recipients, true)
+		if err != nil {
+			s.log.Error("notify: load device tokens failed", "error", err, "type", n.Type)
+			return
+		}
+		if len(tokens) == 0 {
+			return
+		}
+
+		data := map[string]string{"type": n.Type, "wedding_id": n.WeddingID.String()}
+		invalid := s.pusher.Send(ctx, tokens, push.Message{Title: n.Title, Body: n.Body, Data: data})
+		if len(invalid) > 0 {
+			if err := s.devices.DeleteTokens(ctx, invalid); err != nil {
+				s.log.Error("notify: prune invalid tokens failed", "error", err, "count", len(invalid))
+			}
+		}
+	}()
 }
 
 // List returns a user's notifications, newest first (optionally unread only).

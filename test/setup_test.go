@@ -16,6 +16,7 @@ import (
 	"zawaj/internal/auth"
 	"zawaj/internal/database"
 	"zawaj/internal/handler"
+	"zawaj/internal/push"
 	"zawaj/internal/repository"
 	"zawaj/internal/router"
 	"zawaj/internal/service"
@@ -50,8 +51,9 @@ func newApp(t *testing.T) *gin.Engine {
 	guestRepo := repository.NewGuestRepo(db)
 	notifRepo := repository.NewNotificationRepo(db)
 	statsRepo := repository.NewStatsRepo(db)
+	deviceRepo := repository.NewDeviceTokenRepo(db)
 	activitySvc := service.NewActivityService(repository.NewActivityRepo(db), log)
-	notifSvc := service.NewNotificationService(notifRepo, weddingRepo, log)
+	notifSvc := service.NewNotificationService(notifRepo, weddingRepo, deviceRepo, push.NewNoop(log), log)
 	guestSvc := service.NewGuestService(guestRepo, activitySvc, notifSvc)
 
 	return router.New(db, log, true,
@@ -62,13 +64,14 @@ func newApp(t *testing.T) *gin.Engine {
 		handler.NewStats(service.NewStatsService(statsRepo), weddingRepo, tokens),
 		handler.NewNotification(notifSvc, tokens),
 		handler.NewExport(guestRepo, weddingRepo, tokens),
+		handler.NewDevice(deviceRepo, tokens),
 	)
 }
 
 // cleanDB truncates all tables so each test starts from empty.
 func cleanDB(t *testing.T, db *gorm.DB) {
 	t.Helper()
-	err := db.Exec("TRUNCATE users, weddings, memberships, invite_links, guests, guest_notes, activity_logs, notifications RESTART IDENTITY CASCADE").Error
+	err := db.Exec("TRUNCATE users, weddings, memberships, invite_links, guests, guest_notes, activity_logs, notifications, device_tokens RESTART IDENTITY CASCADE").Error
 	if err != nil {
 		t.Fatalf("truncate: %v", err)
 	}

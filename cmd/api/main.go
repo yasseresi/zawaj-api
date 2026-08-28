@@ -34,6 +34,7 @@ import (
 	"zawaj/internal/config"
 	"zawaj/internal/database"
 	"zawaj/internal/handler"
+	"zawaj/internal/push"
 	"zawaj/internal/repository"
 	"zawaj/internal/router"
 	"zawaj/internal/service"
@@ -73,9 +74,14 @@ func main() {
 
 	notifRepo := repository.NewNotificationRepo(db)
 	statsRepo := repository.NewStatsRepo(db)
+	deviceRepo := repository.NewDeviceTokenRepo(db)
+
+	// FCM push sender. Falls back to a no-op when Firebase credentials are absent
+	// (dev/CI); set GOOGLE_APPLICATION_CREDENTIALS to enable real delivery.
+	pusher := push.New(context.Background(), log)
 
 	activitySvc := service.NewActivityService(activityRepo, log)
-	notifSvc := service.NewNotificationService(notifRepo, weddingRepo, log)
+	notifSvc := service.NewNotificationService(notifRepo, weddingRepo, deviceRepo, pusher, log)
 	guestSvc := service.NewGuestService(guestRepo, activitySvc, notifSvc)
 
 	authModule := handler.NewAuth(service.NewAuthService(userRepo, tokens, cfg.LoginMaxAttempts, cfg.LoginLockout), tokens)
@@ -85,10 +91,12 @@ func main() {
 	statsModule := handler.NewStats(service.NewStatsService(statsRepo), weddingRepo, tokens)
 	notifModule := handler.NewNotification(notifSvc, tokens)
 	exportModule := handler.NewExport(guestRepo, weddingRepo, tokens)
+	deviceModule := handler.NewDevice(deviceRepo, tokens)
 
 	r := router.New(db, log, cfg.IsProduction(),
 		authModule, weddingModule, guestModule,
 		activityModule, statsModule, notifModule, exportModule,
+		deviceModule,
 	)
 
 	// Swagger UI at /swagger/index.html. Off in production unless ENABLE_SWAGGER=true,

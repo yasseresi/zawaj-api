@@ -120,6 +120,21 @@ definitions:
     required:
     - refresh
     type: object
+  zawaj_internal_dto.RegisterDeviceRequest:
+    properties:
+      platform:
+        enum:
+        - android
+        - ios
+        - web
+        type: string
+      token:
+        maxLength: 512
+        type: string
+    required:
+    - platform
+    - token
+    type: object
   zawaj_internal_dto.RegisterRequest:
     properties:
       display_name:
@@ -166,6 +181,14 @@ definitions:
         type: string
     required:
     - user_id
+    type: object
+  zawaj_internal_dto.UnregisterDeviceRequest:
+    properties:
+      token:
+        maxLength: 512
+        type: string
+    required:
+    - token
     type: object
   zawaj_internal_dto.UpdateGuestRequest:
     properties:
@@ -669,6 +692,110 @@ paths:
       summary: Update current user profile
       tags:
       - me
+  /me/devices:
+    delete:
+      consumes:
+      - application/json
+      description: Removes an FCM token (e.g. on logout). 404 if the token is not
+        registered to this user.
+      parameters:
+      - description: Token
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/zawaj_internal_dto.UnregisterDeviceRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: '{ unregistered: true }'
+          schema:
+            allOf:
+            - $ref: '#/definitions/zawaj_pkg_response.Envelope'
+            - properties:
+                data:
+                  type: object
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            allOf:
+            - $ref: '#/definitions/zawaj_pkg_response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/zawaj_pkg_response.APIError'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/zawaj_pkg_response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/zawaj_pkg_response.APIError'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/zawaj_pkg_response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/zawaj_pkg_response.APIError'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Unregister a device
+      tags:
+      - devices
+    post:
+      consumes:
+      - application/json
+      description: Upserts an FCM token for the current user. Call after obtaining/refreshing
+        the FCM token.
+      parameters:
+      - description: Token + platform
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/zawaj_internal_dto.RegisterDeviceRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: '{ registered: true }'
+          schema:
+            allOf:
+            - $ref: '#/definitions/zawaj_pkg_response.Envelope'
+            - properties:
+                data:
+                  type: object
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            allOf:
+            - $ref: '#/definitions/zawaj_pkg_response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/zawaj_pkg_response.APIError'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/zawaj_pkg_response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/zawaj_pkg_response.APIError'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Register a device for push
+      tags:
+      - devices
   /me/password:
     patch:
       consumes:

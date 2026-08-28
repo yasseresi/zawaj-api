@@ -81,6 +81,7 @@ func (r *UserRepo) DeleteWithOwnedData(ctx context.Context, userID uuid.UUID) er
 		"DELETE FROM weddings WHERE owner_id = ?",
 		"DELETE FROM memberships WHERE user_id = ?",
 		"DELETE FROM notifications WHERE user_id = ?",
+		"DELETE FROM device_tokens WHERE user_id = ?",
 	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for _, q := range stmts {

@@ -18,5 +18,6 @@ func Migrate(db *gorm.DB) error {
 		&models.GuestNote{},
 		&models.ActivityLog{},
 		&models.Notification{},
+		&models.DeviceToken{},
 	)
 }

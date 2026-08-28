@@ -132,3 +132,36 @@ func TestTransferOwnership(t *testing.T) {
 		t.Fatalf("demoted owner transfer: want 403, got %d", code)
 	}
 }
+
+// Device registration: register upserts a token, unregister removes it, and
+// unregistering an unknown token 404s. (Push delivery uses the no-op sender in
+// tests, so no external calls occur.)
+func TestDeviceRegistration(t *testing.T) {
+	e := newApp(t)
+	sarah, _ := register(t, e, "sarah_d")
+
+	if code, _ := do(t, e, "POST", "/api/v1/me/devices", sarah, map[string]any{
+		"token": "fcm-token-abc", "platform": "android",
+	}); code != http.StatusCreated {
+		t.Fatalf("register device: want 201, got %d", code)
+	}
+	if code, _ := do(t, e, "POST", "/api/v1/me/devices", sarah, map[string]any{
+		"token": "fcm-token-abc", "platform": "ios",
+	}); code != http.StatusCreated {
+		t.Fatalf("re-register device: want 201, got %d", code)
+	}
+	if code, _ := do(t, e, "POST", "/api/v1/me/devices", sarah, map[string]any{
+		"token": "x", "platform": "nokia",
+	}); code != http.StatusBadRequest {
+		t.Fatalf("bad platform: want 400, got %d", code)
+	}
+	if code, _ := do(t, e, "DELETE", "/api/v1/me/devices", sarah, map[string]any{"token": "fcm-token-abc"}); code != http.StatusOK {
+		t.Fatalf("unregister device: want 200, got %d", code)
+	}
+	if code, _ := do(t, e, "DELETE", "/api/v1/me/devices", sarah, map[string]any{"token": "fcm-token-abc"}); code != http.StatusNotFound {
+		t.Fatalf("unregister missing: want 404, got %d", code)
+	}
+	if code, _ := do(t, e, "POST", "/api/v1/me/devices", "", map[string]any{"token": "y", "platform": "web"}); code != http.StatusUnauthorized {
+		t.Fatalf("unauth register: want 401, got %d", code)
+	}
+}

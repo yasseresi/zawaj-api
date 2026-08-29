@@ -1,0 +1,8 @@
+# Example Prometheus scrape config for the Zawaj API. Merge into prometheus.yml.
+# Keep /metrics internal-only (network/proxy); do not expose it publicly.
+scrape_configs:
+  - job_name: zawaj-api
+    metrics_path: /metrics
+    scrape_interval: 15s
+    static_configs:
+      - targets: ["zawaj-api:8080"] # service DNS / host:port of the API

@@ -1,0 +1,73 @@
+# Prometheus alerting rules for the Zawaj API. Load via prometheus.yml:
+#   rule_files: ["prometheus-rules.yml"]
+# Metrics come from GET /metrics (see internal/middleware/metrics.go): the
+# http_requests_total / http_request_duration_seconds / http_requests_in_flight
+# series plus promhttp's default go_* and process_* series.
+groups:
+  - name: zawaj-api-availability
+    rules:
+      - alert: ZawajApiDown
+        expr: up{job="zawaj-api"} == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "Zawaj API target is down"
+          description: "No successful scrape of {{ $labels.instance }} for 2m."
+
+  - name: zawaj-api-slo
+    rules:
+      # Error rate: 5xx as a fraction of all requests over 5m.
+      - alert: HighErrorRateWarning
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[5m]))
+            / sum(rate(http_requests_total[5m])) > 0.02
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "5xx error rate > 2% (10m)"
+          description: "Above the 2% rollback trigger. Check logs/traces."
+
+      - alert: HighErrorRateCritical
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[5m]))
+            / sum(rate(http_requests_total[5m])) > 0.05
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "5xx error rate > 5% (5m)"
+          description: "Consider rollback (previous image tag)."
+
+      # Latency: p95 request duration across all routes.
+      - alert: HighLatencyP95
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(http_request_duration_seconds_bucket[5m]))) > 0.8
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "p95 latency > 800ms (10m)"
+          description: "Matches the latency rollback trigger. Inspect slow routes."
+
+      # Saturation: sustained in-flight requests (tune to your capacity).
+      - alert: HighInFlightRequests
+        expr: http_requests_in_flight > 100
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Sustained in-flight requests > 100"
+          description: "Possible saturation or a slow dependency (DB)."
+
+  - name: zawaj-api-slo-burn
+    rules:
+      # Fast-burn on a 99.9% availability SLO (0.1% budget): >14.4x burn over
+      # 1h AND 5m windows fires quickly on a real outage. Adjust to your SLO.
+      - alert: ErrorBudgetFastBurn
+        expr: |
+          (sum(rate(http_requests_total{status=~"5.."}[1h])) / sum(rate(http_requests_total[1h])) > 0.0144)
+          and
+          (sum(rate(http_requests_total{status=~"5.."}[5m])) / sum(rate(http_requests_total[5m])) > 0.0144)
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "Fast error-budget burn (99.9% SLO)"
+          description: "Burning >14.4x budget on 1h+5m windows."

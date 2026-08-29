@@ -64,6 +64,14 @@ func TestLoad_ProductionRejectsWildcardCORS(t *testing.T) {
 	}
 }
 
+func TestLoad_ProductionRequiresCORSOrigins(t *testing.T) {
+	setProdBase(t)
+	t.Setenv("CORS_ALLOWED_ORIGINS", "")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected error when CORS_ALLOWED_ORIGINS is empty in production")
+	}
+}
+
 func TestLoad_DevDefaultsCORSWildcard(t *testing.T) {
 	t.Setenv("APP_ENV", "development")
 	t.Setenv("DATABASE_URL", "postgres://u:p@localhost/zawaj?sslmode=disable")

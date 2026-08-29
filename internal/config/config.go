@@ -108,6 +108,9 @@ func Load() (*Config, error) {
 		if strings.Contains(cfg.DatabaseURL, "sslmode=disable") {
 			return nil, fmt.Errorf("config: DATABASE_URL must not use sslmode=disable in production")
 		}
+		if len(cfg.CORSAllowedOrigins) == 0 {
+			return nil, fmt.Errorf("config: CORS_ALLOWED_ORIGINS is required in production")
+		}
 	}
 
 	return cfg, nil

@@ -20,5 +20,6 @@ func Migrate(db *gorm.DB) error {
 		&models.Notification{},
 		&models.DeviceToken{},
 		&models.RefreshToken{},
+		&models.IdempotencyKey{},
 	)
 }

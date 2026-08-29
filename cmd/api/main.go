@@ -107,6 +107,7 @@ func main() {
 	deviceModule := handler.NewDevice(deviceRepo, tokens)
 
 	r := router.New(db, log, cfg.IsProduction(), cfg.CORSAllowedOrigins, cfg.RateLimitRPS, cfg.RateLimitBurst,
+		tokens, repository.NewIdempotencyRepo(db),
 		authModule, weddingModule, guestModule,
 		activityModule, statsModule, notifModule, exportModule,
 		deviceModule,

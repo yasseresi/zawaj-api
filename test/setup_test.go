@@ -56,7 +56,7 @@ func newApp(t *testing.T) *gin.Engine {
 	notifSvc := service.NewNotificationService(notifRepo, weddingRepo, deviceRepo, push.NewNoop(log), log)
 	guestSvc := service.NewGuestService(guestRepo, activitySvc, notifSvc)
 
-	return router.New(db, log, true, []string{"*"}, 0, 0, // rate limiting disabled in tests
+	return router.New(db, log, true, []string{"*"}, 0, 0, tokens, repository.NewIdempotencyRepo(db), // rate limiting disabled in tests
 		handler.NewAuth(service.NewAuthService(userRepo, repository.NewRefreshTokenRepo(db), tokens, 5, time.Minute), tokens),
 		handler.NewWedding(service.NewWeddingService(weddingRepo), weddingRepo, tokens),
 		handler.NewGuest(guestSvc, activitySvc, weddingRepo, tokens),
@@ -71,7 +71,7 @@ func newApp(t *testing.T) *gin.Engine {
 // cleanDB truncates all tables so each test starts from empty.
 func cleanDB(t *testing.T, db *gorm.DB) {
 	t.Helper()
-	err := db.Exec("TRUNCATE users, weddings, memberships, invite_links, guests, guest_notes, activity_logs, notifications, device_tokens, refresh_tokens RESTART IDENTITY CASCADE").Error
+	err := db.Exec("TRUNCATE users, weddings, memberships, invite_links, guests, guest_notes, activity_logs, notifications, device_tokens, refresh_tokens, idempotency_keys RESTART IDENTITY CASCADE").Error
 	if err != nil {
 		t.Fatalf("truncate: %v", err)
 	}

@@ -8,8 +8,10 @@ import (
 	"log/slog"
 	"time"
 
+	"zawaj/internal/auth"
 	"zawaj/internal/handler"
 	"zawaj/internal/middleware"
+	"zawaj/internal/repository"
 
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -33,7 +35,7 @@ type Module interface {
 // New builds the engine with global middleware, health probes, and the given
 // feature modules mounted under /api/v1. corsOrigins is the CORS allowlist;
 // rateRPS/rateBurst configure the per-IP rate limiter (rateRPS <= 0 disables it).
-func New(db *gorm.DB, log *slog.Logger, production bool, corsOrigins []string, rateRPS float64, rateBurst int, modules ...Module) *gin.Engine {
+func New(db *gorm.DB, log *slog.Logger, production bool, corsOrigins []string, rateRPS float64, rateBurst int, tokens *auth.Manager, idem *repository.IdempotencyRepo, modules ...Module) *gin.Engine {
 	if production {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -50,6 +52,7 @@ func New(db *gorm.DB, log *slog.Logger, production bool, corsOrigins []string, r
 		middleware.SecurityHeaders(production),
 		middleware.CORS(corsOrigins),
 		middleware.RateLimit(rateRPS, rateBurst),
+		middleware.Idempotency(tokens, idem),
 		middleware.RequestID(),
 		middleware.Logger(log),
 		middleware.Recover(log),

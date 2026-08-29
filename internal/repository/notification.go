@@ -44,6 +44,25 @@ func (r *NotificationRepo) ListForUser(ctx context.Context, userID uuid.UUID, un
 	return out, err
 }
 
+// ListForUserKeyset returns a user's notifications newest-first using keyset
+// pagination. hasCursor=false returns the first page; otherwise rows strictly
+// older than (curTime, curID). unreadOnly filters to read_at IS NULL.
+func (r *NotificationRepo) ListForUserKeyset(ctx context.Context, userID uuid.UUID, unreadOnly, hasCursor bool, curTime time.Time, curID uuid.UUID, limit int) ([]models.Notification, error) {
+	q := r.db.WithContext(ctx).Where("user_id = ?", userID)
+	if unreadOnly {
+		q = q.Where("read_at IS NULL")
+	}
+	if hasCursor {
+		q = q.Where("(created_at, id) < (?, ?)", curTime, curID)
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	var out []models.Notification
+	err := q.Order("created_at DESC, id DESC").Limit(limit).Find(&out).Error
+	return out, err
+}
+
 // UnreadCount returns how many unread notifications a user has.
 func (r *NotificationRepo) UnreadCount(ctx context.Context, userID uuid.UUID) (int64, error) {
 	var n int64

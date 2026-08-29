@@ -8,6 +8,7 @@ import (
 	"zawaj/internal/events"
 	"zawaj/internal/models"
 	"zawaj/internal/repository"
+	"zawaj/pkg/pagination"
 
 	"github.com/google/uuid"
 )
@@ -46,6 +47,25 @@ func (s *ActivityService) Feed(ctx context.Context, weddingID uuid.UUID, limit, 
 		return nil, apperr.Internal("activity feed failed")
 	}
 	return items, nil
+}
+
+// FeedCursor returns a wedding's activity newest-first with keyset pagination.
+// It returns the page and an opaque next cursor ("" when there are no more rows).
+func (s *ActivityService) FeedCursor(ctx context.Context, weddingID uuid.UUID, cursor string, limit int) ([]models.ActivityLog, string, error) {
+	cur, has, err := pagination.Decode(cursor)
+	if err != nil {
+		return nil, "", apperr.Validation("invalid cursor")
+	}
+	items, err := s.repo.ListByWeddingKeyset(ctx, weddingID, has, cur.CreatedAt, cur.ID, limit)
+	if err != nil {
+		return nil, "", apperr.Internal("activity feed failed")
+	}
+	next := ""
+	if limit > 0 && len(items) == limit {
+		last := items[len(items)-1]
+		next = pagination.Encode(last.CreatedAt, last.ID)
+	}
+	return items, next, nil
 }
 
 // GuestHistory returns a guest's change history (screen 7 timeline).

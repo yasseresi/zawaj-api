@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"zawaj/internal/models"
 
@@ -27,6 +28,19 @@ func (r *ActivityRepo) ListByWedding(ctx context.Context, weddingID uuid.UUID, l
 		Where("wedding_id = ?", weddingID).
 		Order("created_at DESC").Limit(limit).Offset(offset).
 		Find(&out).Error
+	return out, err
+}
+
+// ListByWeddingKeyset returns a wedding's activity newest-first using keyset
+// pagination. When hasCursor is false it returns the first page; otherwise it
+// returns rows strictly older than (curTime, curID). Stable under inserts.
+func (r *ActivityRepo) ListByWeddingKeyset(ctx context.Context, weddingID uuid.UUID, hasCursor bool, curTime time.Time, curID uuid.UUID, limit int) ([]models.ActivityLog, error) {
+	q := r.db.WithContext(ctx).Where("wedding_id = ?", weddingID)
+	if hasCursor {
+		q = q.Where("(created_at, id) < (?, ?)", curTime, curID)
+	}
+	var out []models.ActivityLog
+	err := q.Order("created_at DESC, id DESC").Limit(limit).Find(&out).Error
 	return out, err
 }
 

@@ -1265,9 +1265,9 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
-                        "type": "integer",
-                        "description": "Page (default 1)",
-                        "name": "page",
+                        "type": "string",
+                        "description": "Opaque keyset cursor from a previous response's next_cursor",
+                        "name": "cursor",
                         "in": "query"
                     },
                     {
@@ -1279,7 +1279,7 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "{ items: [...] }",
+                        "description": "{ items: [...], next_cursor: string|null }",
                         "schema": {
                             "allOf": [
                                 {
@@ -1895,9 +1895,9 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "type": "integer",
-                        "description": "Page (default 1)",
-                        "name": "page",
+                        "type": "string",
+                        "description": "Opaque keyset cursor from a previous response's next_cursor",
+                        "name": "cursor",
                         "in": "query"
                     },
                     {
@@ -1909,7 +1909,7 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "{ items: [...] }",
+                        "description": "{ items: [...], next_cursor: string|null }",
                         "schema": {
                             "allOf": [
                                 {

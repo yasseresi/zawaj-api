@@ -258,6 +258,15 @@ func guestID(c *gin.Context) (uuid.UUID, bool) {
 	return id, true
 }
 
+// nullable returns nil for an empty string so a JSON field serializes as null
+// (used for next_cursor at the end of a keyset stream).
+func nullable(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
 // paging reads ?page= and ?page_size= with sane defaults/caps.
 func paging(c *gin.Context) (page, size int) {
 	page, _ = strconv.Atoi(c.Query("page"))

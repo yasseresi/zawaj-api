@@ -41,21 +41,21 @@ func (h *Notification) Register(rg *gin.RouterGroup) {
 // @Produce  json
 // @Security BearerAuth
 // @Param    unread query bool false "Only unread when true"
-// @Param    page query int false "Page (default 1)"
+// @Param    cursor query string false "Opaque keyset cursor from a previous response's next_cursor"
 // @Param    page_size query int false "Page size (default 50, max 200)"
-// @Success  200 {object} response.Envelope{data=object} "{ items: [...] }"
+// @Success  200 {object} response.Envelope{data=object} "{ items: [...], next_cursor: string|null }"
 // @Failure  401 {object} response.Envelope{error=response.APIError}
 // @Router   /notifications [get]
 func (h *Notification) list(c *gin.Context) {
 	userID, _ := middleware.UserID(c)
-	page, size := paging(c)
+	_, size := paging(c)
 	unread := c.Query("unread") == "true"
-	items, err := h.svc.List(c.Request.Context(), userID, unread, size, (page-1)*size)
+	items, next, err := h.svc.ListCursor(c.Request.Context(), userID, unread, c.Query("cursor"), size)
 	if err != nil {
 		apperr.Write(c, err)
 		return
 	}
-	response.JSON(c, http.StatusOK, gin.H{"items": items})
+	response.JSON(c, http.StatusOK, gin.H{"items": items, "next_cursor": nullable(next)})
 }
 
 // unreadCount godoc

@@ -11,6 +11,7 @@ import (
 	"zawaj/internal/models"
 	"zawaj/internal/push"
 	"zawaj/internal/repository"
+	"zawaj/pkg/pagination"
 
 	"github.com/google/uuid"
 )
@@ -110,6 +111,25 @@ func (s *NotificationService) List(ctx context.Context, userID uuid.UUID, unread
 		return nil, apperr.Internal("list notifications failed")
 	}
 	return items, nil
+}
+
+// ListCursor returns a user's notifications newest-first with keyset pagination,
+// plus an opaque next cursor ("" when there are no more rows).
+func (s *NotificationService) ListCursor(ctx context.Context, userID uuid.UUID, unreadOnly bool, cursor string, limit int) ([]models.Notification, string, error) {
+	cur, has, err := pagination.Decode(cursor)
+	if err != nil {
+		return nil, "", apperr.Validation("invalid cursor")
+	}
+	items, err := s.notifs.ListForUserKeyset(ctx, userID, unreadOnly, has, cur.CreatedAt, cur.ID, limit)
+	if err != nil {
+		return nil, "", apperr.Internal("list notifications failed")
+	}
+	next := ""
+	if limit > 0 && len(items) == limit {
+		last := items[len(items)-1]
+		next = pagination.Encode(last.CreatedAt, last.ID)
+	}
+	return items, next, nil
 }
 
 // UnreadCount returns how many unread notifications a user has.

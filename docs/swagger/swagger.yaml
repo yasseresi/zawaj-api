@@ -967,10 +967,10 @@ paths:
         in: query
         name: unread
         type: boolean
-      - description: Page (default 1)
+      - description: Opaque keyset cursor from a previous response's next_cursor
         in: query
-        name: page
-        type: integer
+        name: cursor
+        type: string
       - description: Page size (default 50, max 200)
         in: query
         name: page_size
@@ -979,7 +979,7 @@ paths:
       - application/json
       responses:
         "200":
-          description: '{ items: [...] }'
+          description: '{ items: [...], next_cursor: string|null }'
           schema:
             allOf:
             - $ref: '#/definitions/zawaj_pkg_response.Envelope'
@@ -1307,10 +1307,10 @@ paths:
         name: id
         required: true
         type: string
-      - description: Page (default 1)
+      - description: Opaque keyset cursor from a previous response's next_cursor
         in: query
-        name: page
-        type: integer
+        name: cursor
+        type: string
       - description: Page size (default 50, max 200)
         in: query
         name: page_size
@@ -1319,7 +1319,7 @@ paths:
       - application/json
       responses:
         "200":
-          description: '{ items: [...] }'
+          description: '{ items: [...], next_cursor: string|null }'
           schema:
             allOf:
             - $ref: '#/definitions/zawaj_pkg_response.Envelope'

@@ -41,17 +41,17 @@ func (h *Activity) Register(rg *gin.RouterGroup) {
 // @Produce  json
 // @Security BearerAuth
 // @Param    id path string true "Wedding ID"
-// @Param    page query int false "Page (default 1)"
+// @Param    cursor query string false "Opaque keyset cursor from a previous response's next_cursor"
 // @Param    page_size query int false "Page size (default 50, max 200)"
-// @Success  200 {object} response.Envelope{data=object} "{ items: [...] }"
+// @Success  200 {object} response.Envelope{data=object} "{ items: [...], next_cursor: string|null }"
 // @Failure  403 {object} response.Envelope{error=response.APIError}
 // @Router   /weddings/{id}/activity [get]
 func (h *Activity) feed(c *gin.Context) {
-	page, size := paging(c)
-	items, err := h.svc.Feed(c.Request.Context(), middleware.WeddingID(c), size, (page-1)*size)
+	_, size := paging(c)
+	items, next, err := h.svc.FeedCursor(c.Request.Context(), middleware.WeddingID(c), c.Query("cursor"), size)
 	if err != nil {
 		apperr.Write(c, err)
 		return
 	}
-	response.JSON(c, http.StatusOK, gin.H{"items": items})
+	response.JSON(c, http.StatusOK, gin.H{"items": items, "next_cursor": nullable(next)})
 }

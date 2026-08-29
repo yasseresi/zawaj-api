@@ -18,10 +18,15 @@ const (
 // ErrInvalidToken is returned for any malformed, expired, or wrong-type token.
 var ErrInvalidToken = errors.New("invalid token")
 
-// TokenPair is an access + refresh token issued together.
+// TokenPair is an access + refresh token issued together. RefreshJTI is the
+// refresh token's unique id (embedded as the "jti" claim); the auth service
+// stores it so the token can be rotated and revoked server-side. RefreshExpiry
+// is when the refresh token expires.
 type TokenPair struct {
-	Access  string `json:"access"`
-	Refresh string `json:"refresh"`
+	Access        string    `json:"access"`
+	Refresh       string    `json:"refresh"`
+	RefreshJTI    uuid.UUID `json:"-"`
+	RefreshExpiry time.Time `json:"-"`
 }
 
 // Claims is the JWT payload.
@@ -48,43 +53,51 @@ func NewManager(accessSecret, refreshSecret string, accessTTL, refreshTTL time.D
 	}
 }
 
-// Issue returns a fresh access+refresh pair for the given user.
+// Issue returns a fresh access+refresh pair for the given user. The refresh token
+// carries a unique jti (also returned as TokenPair.RefreshJTI) so the caller can
+// persist it for rotation/revocation.
 func (m *Manager) Issue(userID uuid.UUID) (TokenPair, error) {
-	access, err := m.sign(userID, typeAccess, m.accessSecret, m.accessTTL)
+	access, err := m.sign(userID, typeAccess, uuid.Nil, m.accessSecret, m.accessTTL)
 	if err != nil {
 		return TokenPair{}, err
 	}
-	refresh, err := m.sign(userID, typeRefresh, m.refreshSecret, m.refreshTTL)
+	jti := uuid.New()
+	exp := time.Now().Add(m.refreshTTL)
+	refresh, err := m.sign(userID, typeRefresh, jti, m.refreshSecret, m.refreshTTL)
 	if err != nil {
 		return TokenPair{}, err
 	}
-	return TokenPair{Access: access, Refresh: refresh}, nil
+	return TokenPair{Access: access, Refresh: refresh, RefreshJTI: jti, RefreshExpiry: exp}, nil
 }
 
 // ParseAccess validates an access token and returns the user id.
 func (m *Manager) ParseAccess(token string) (uuid.UUID, error) {
-	return m.parse(token, typeAccess, m.accessSecret)
+	id, _, err := m.parse(token, typeAccess, m.accessSecret)
+	return id, err
 }
 
-// ParseRefresh validates a refresh token and returns the user id.
-func (m *Manager) ParseRefresh(token string) (uuid.UUID, error) {
+// ParseRefresh validates a refresh token and returns the user id and its jti.
+func (m *Manager) ParseRefresh(token string) (uuid.UUID, uuid.UUID, error) {
 	return m.parse(token, typeRefresh, m.refreshSecret)
 }
 
-func (m *Manager) sign(userID uuid.UUID, typ string, secret []byte, ttl time.Duration) (string, error) {
+func (m *Manager) sign(userID uuid.UUID, typ string, jti uuid.UUID, secret []byte, ttl time.Duration) (string, error) {
 	now := time.Now()
-	claims := Claims{
-		Type: typ,
-		RegisteredClaims: jwt.RegisteredClaims{
-			Subject:   userID.String(),
-			IssuedAt:  jwt.NewNumericDate(now),
-			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
-		},
+	rc := jwt.RegisteredClaims{
+		Subject:   userID.String(),
+		IssuedAt:  jwt.NewNumericDate(now),
+		ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
 	}
+	if jti != uuid.Nil {
+		rc.ID = jti.String()
+	}
+	claims := Claims{Type: typ, RegisteredClaims: rc}
 	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(secret)
 }
 
-func (m *Manager) parse(token, wantType string, secret []byte) (uuid.UUID, error) {
+// parse validates the token and returns (userID, jti). jti is uuid.Nil when the
+// token carries no id (e.g. access tokens).
+func (m *Manager) parse(token, wantType string, secret []byte) (uuid.UUID, uuid.UUID, error) {
 	var claims Claims
 	_, err := jwt.ParseWithClaims(token, &claims, func(t *jwt.Token) (any, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
@@ -93,11 +106,17 @@ func (m *Manager) parse(token, wantType string, secret []byte) (uuid.UUID, error
 		return secret, nil
 	})
 	if err != nil || claims.Type != wantType {
-		return uuid.Nil, ErrInvalidToken
+		return uuid.Nil, uuid.Nil, ErrInvalidToken
 	}
 	id, err := uuid.Parse(claims.Subject)
 	if err != nil {
-		return uuid.Nil, ErrInvalidToken
+		return uuid.Nil, uuid.Nil, ErrInvalidToken
 	}
-	return id, nil
+	var jti uuid.UUID
+	if claims.ID != "" {
+		if jti, err = uuid.Parse(claims.ID); err != nil {
+			return uuid.Nil, uuid.Nil, ErrInvalidToken
+		}
+	}
+	return id, jti, nil
 }

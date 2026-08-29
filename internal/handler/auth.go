@@ -31,6 +31,7 @@ func (h *Auth) Register(rg *gin.RouterGroup) {
 	rg.POST("/auth/login", h.login)
 	rg.POST("/auth/refresh", h.refresh)
 	rg.POST("/auth/recover", h.recover)
+	rg.POST("/auth/logout", h.logout)
 
 	me := rg.Group("/me", middleware.RequireAuth(h.tokens))
 	me.GET("", h.me)
@@ -148,6 +149,29 @@ func (h *Auth) recover(c *gin.Context) {
 // @Success  200 {object} response.Envelope{data=dto.UserResponse}
 // @Failure  401 {object} response.Envelope{error=response.APIError}
 // @Router   /me [get]
+// logout godoc
+// @Summary  Log out (revoke a refresh token)
+// @Description Revokes the given refresh token so it can no longer be rotated. Idempotent.
+// @Tags     auth
+// @Accept   json
+// @Produce  json
+// @Param    body body dto.RefreshRequest true "Refresh token to revoke"
+// @Success  200 {object} response.Envelope{data=object} "{ logged_out: true }"
+// @Failure  400 {object} response.Envelope{error=response.APIError}
+// @Router   /auth/logout [post]
+func (h *Auth) logout(c *gin.Context) {
+	var req dto.RefreshRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		apperr.Write(c, apperr.Validation(err.Error()))
+		return
+	}
+	if err := h.svc.Logout(c.Request.Context(), req); err != nil {
+		apperr.Write(c, err)
+		return
+	}
+	response.JSON(c, http.StatusOK, gin.H{"logged_out": true})
+}
+
 func (h *Auth) me(c *gin.Context) {
 	userID, _ := middleware.UserID(c)
 	resp, err := h.svc.Me(c.Request.Context(), userID)

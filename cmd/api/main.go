@@ -68,6 +68,7 @@ func main() {
 	// Dependency wiring. Feature modules are appended to the router as phases land.
 	tokens := auth.NewManager(cfg.JWTAccessSecret, cfg.JWTRefreshSecret, cfg.JWTAccessTTL, cfg.JWTRefreshTTL)
 	userRepo := repository.NewUserRepo(db)
+	refreshRepo := repository.NewRefreshTokenRepo(db)
 	weddingRepo := repository.NewWeddingRepo(db)
 	guestRepo := repository.NewGuestRepo(db)
 	activityRepo := repository.NewActivityRepo(db)
@@ -84,7 +85,7 @@ func main() {
 	notifSvc := service.NewNotificationService(notifRepo, weddingRepo, deviceRepo, pusher, log)
 	guestSvc := service.NewGuestService(guestRepo, activitySvc, notifSvc)
 
-	authModule := handler.NewAuth(service.NewAuthService(userRepo, tokens, cfg.LoginMaxAttempts, cfg.LoginLockout), tokens)
+	authModule := handler.NewAuth(service.NewAuthService(userRepo, refreshRepo, tokens, cfg.LoginMaxAttempts, cfg.LoginLockout), tokens)
 	weddingModule := handler.NewWedding(service.NewWeddingService(weddingRepo), weddingRepo, tokens)
 	guestModule := handler.NewGuest(guestSvc, activitySvc, weddingRepo, tokens)
 	activityModule := handler.NewActivity(activitySvc, weddingRepo, tokens)

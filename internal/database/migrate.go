@@ -19,5 +19,6 @@ func Migrate(db *gorm.DB) error {
 		&models.ActivityLog{},
 		&models.Notification{},
 		&models.DeviceToken{},
+		&models.RefreshToken{},
 	)
 }

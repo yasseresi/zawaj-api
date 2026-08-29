@@ -23,6 +23,7 @@ const dummyHash = "$2a$10$N9qo8uLOickgx2ZMRZoMye.IjZAgcfl7p92ldGxad68LJZdL17lhWy
 // AuthService implements registration, login, refresh, and recovery.
 type AuthService struct {
 	users       *repository.UserRepo
+	refresh     *repository.RefreshTokenRepo
 	tokens      *auth.Manager
 	maxAttempts int
 	lockout     time.Duration
@@ -30,8 +31,21 @@ type AuthService struct {
 
 // NewAuthService builds the service. maxAttempts/lockout govern login brute-force
 // protection (0 attempts disables lockout).
-func NewAuthService(users *repository.UserRepo, tokens *auth.Manager, maxAttempts int, lockout time.Duration) *AuthService {
-	return &AuthService{users: users, tokens: tokens, maxAttempts: maxAttempts, lockout: lockout}
+func NewAuthService(users *repository.UserRepo, refresh *repository.RefreshTokenRepo, tokens *auth.Manager, maxAttempts int, lockout time.Duration) *AuthService {
+	return &AuthService{users: users, refresh: refresh, tokens: tokens, maxAttempts: maxAttempts, lockout: lockout}
+}
+
+// issuePair issues an access+refresh pair and records the refresh token's jti so
+// it can be rotated/revoked later.
+func (s *AuthService) issuePair(ctx context.Context, userID uuid.UUID) (auth.TokenPair, error) {
+	pair, err := s.tokens.Issue(userID)
+	if err != nil {
+		return auth.TokenPair{}, apperr.Internal("token issue failed")
+	}
+	if err := s.refresh.Store(ctx, pair.RefreshJTI, userID, pair.RefreshExpiry); err != nil {
+		return auth.TokenPair{}, apperr.Internal("token issue failed")
+	}
+	return pair, nil
 }
 
 // Register creates a new account and returns tokens plus the one-time recovery code.
@@ -67,9 +81,9 @@ func (s *AuthService) Register(ctx context.Context, req dto.RegisterRequest) (*d
 		return nil, apperr.Internal("register failed")
 	}
 
-	pair, err := s.tokens.Issue(u.ID)
+	pair, err := s.issuePair(ctx, u.ID)
 	if err != nil {
-		return nil, apperr.Internal("token issue failed")
+		return nil, err
 	}
 	resp := dto.NewUserResponse(u)
 	return &dto.AuthResponse{User: &resp, Access: pair.Access, Refresh: pair.Refresh, RecoveryCode: recoveryCode}, nil
@@ -105,9 +119,9 @@ func (s *AuthService) Login(ctx context.Context, req dto.LoginRequest) (*dto.Aut
 		_ = s.users.Update(ctx, u)
 	}
 
-	pair, err := s.tokens.Issue(u.ID)
+	pair, err := s.issuePair(ctx, u.ID)
 	if err != nil {
-		return nil, apperr.Internal("token issue failed")
+		return nil, err
 	}
 	resp := dto.NewUserResponse(u)
 	return &dto.AuthResponse{User: &resp, Access: pair.Access, Refresh: pair.Refresh}, nil
@@ -128,21 +142,63 @@ func (s *AuthService) registerFailure(ctx context.Context, u *models.User) {
 	_ = s.users.Update(ctx, u)
 }
 
-// Refresh exchanges a valid refresh token for a new token pair.
+// Refresh rotates a valid refresh token: it verifies the token, checks the
+// server-side record, revokes it, and issues a new pair. If a token that was
+// already revoked is presented (replay of a rotated/leaked token), it treats
+// this as a breach and revokes every refresh token of the user.
 func (s *AuthService) Refresh(ctx context.Context, req dto.RefreshRequest) (*dto.AuthResponse, error) {
-	userID, err := s.tokens.ParseRefresh(req.Refresh)
+	userID, jti, err := s.tokens.ParseRefresh(req.Refresh)
 	if err != nil {
 		return nil, apperr.Unauthenticated("invalid refresh token")
 	}
+
+	row, err := s.refresh.ByID(ctx, jti)
+	if errors.Is(err, repository.ErrNotFound) {
+		return nil, apperr.Unauthenticated("invalid refresh token")
+	}
+	if err != nil {
+		return nil, apperr.Internal("refresh failed")
+	}
+	if row.UserID != userID {
+		return nil, apperr.Unauthenticated("invalid refresh token")
+	}
+	if row.RevokedAt != nil {
+		// Reuse of a revoked token → assume compromise; kill the whole family.
+		_ = s.refresh.RevokeAllForUser(ctx, userID)
+		return nil, apperr.Unauthenticated("refresh token has been revoked")
+	}
+	if row.ExpiresAt.Before(time.Now()) {
+		return nil, apperr.Unauthenticated("refresh token expired")
+	}
+
 	u, err := s.users.ByID(ctx, userID)
 	if err != nil {
 		return nil, apperr.Unauthenticated("invalid refresh token")
 	}
-	pair, err := s.tokens.Issue(u.ID)
+
+	// Rotate: revoke the presented token, issue a new pair.
+	if err := s.refresh.Revoke(ctx, jti); err != nil {
+		return nil, apperr.Internal("refresh failed")
+	}
+	pair, err := s.issuePair(ctx, u.ID)
 	if err != nil {
-		return nil, apperr.Internal("token issue failed")
+		return nil, err
 	}
 	return &dto.AuthResponse{Access: pair.Access, Refresh: pair.Refresh}, nil
+}
+
+// Logout revokes the presented refresh token so it can no longer be rotated.
+// Idempotent and safe to call with an already-invalid token.
+func (s *AuthService) Logout(ctx context.Context, req dto.RefreshRequest) error {
+	_, jti, err := s.tokens.ParseRefresh(req.Refresh)
+	if err != nil {
+		// Nothing to revoke for an unparseable token; report success (idempotent).
+		return nil
+	}
+	if err := s.refresh.Revoke(ctx, jti); err != nil {
+		return apperr.Internal("logout failed")
+	}
+	return nil
 }
 
 // Recover resets the PIN using the one-time recovery code and issues a fresh code.
@@ -182,10 +238,12 @@ func (s *AuthService) Recover(ctx context.Context, req dto.RecoverRequest) (*dto
 	if err := s.users.Update(ctx, u); err != nil {
 		return nil, apperr.Internal("recover failed")
 	}
+	// Password was reset — invalidate any existing sessions.
+	_ = s.refresh.RevokeAllForUser(ctx, u.ID)
 
-	pair, err := s.tokens.Issue(u.ID)
+	pair, err := s.issuePair(ctx, u.ID)
 	if err != nil {
-		return nil, apperr.Internal("token issue failed")
+		return nil, err
 	}
 	return &dto.AuthResponse{Access: pair.Access, Refresh: pair.Refresh, RecoveryCode: newCode}, nil
 }
@@ -226,6 +284,8 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID uuid.UUID, req 
 	if err := s.users.Update(ctx, u); err != nil {
 		return apperr.Internal("change password failed")
 	}
+	// Invalidate existing sessions after a password change.
+	_ = s.refresh.RevokeAllForUser(ctx, userID)
 	return nil
 }
 

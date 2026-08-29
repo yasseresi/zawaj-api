@@ -339,6 +339,56 @@ paths:
       summary: Log in
       tags:
       - auth
+  /auth/logout:
+    post:
+      consumes:
+      - application/json
+      description: Revokes the given refresh token so it can no longer be rotated.
+        Idempotent.
+      parameters:
+      - description: Refresh token to revoke
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/zawaj_internal_dto.RefreshRequest'
+      produces:
+      - application/json
+      - application/json
+      responses:
+        "200":
+          description: '{ logged_out: true }'
+          schema:
+            allOf:
+            - $ref: '#/definitions/zawaj_pkg_response.Envelope'
+            - properties:
+                data:
+                  type: object
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            allOf:
+            - $ref: '#/definitions/zawaj_pkg_response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/zawaj_pkg_response.APIError'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/zawaj_pkg_response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/zawaj_pkg_response.APIError'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Log out (revoke a refresh token)
+      tags:
+      - me
+      - auth
   /auth/recover:
     post:
       consumes:
@@ -621,17 +671,38 @@ paths:
       tags:
       - me
     get:
+      consumes:
+      - application/json
+      description: Revokes the given refresh token so it can no longer be rotated.
+        Idempotent.
+      parameters:
+      - description: Refresh token to revoke
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/zawaj_internal_dto.RefreshRequest'
       produces:
+      - application/json
       - application/json
       responses:
         "200":
-          description: OK
+          description: '{ logged_out: true }'
           schema:
             allOf:
             - $ref: '#/definitions/zawaj_pkg_response.Envelope'
             - properties:
                 data:
-                  $ref: '#/definitions/zawaj_internal_dto.UserResponse'
+                  type: object
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            allOf:
+            - $ref: '#/definitions/zawaj_pkg_response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/zawaj_pkg_response.APIError'
               type: object
         "401":
           description: Unauthorized
@@ -644,9 +715,10 @@ paths:
               type: object
       security:
       - BearerAuth: []
-      summary: Get current user
+      summary: Log out (revoke a refresh token)
       tags:
       - me
+      - auth
     patch:
       consumes:
       - application/json

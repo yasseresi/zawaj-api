@@ -39,12 +39,18 @@ func (w *bodyCaptureWriter) WriteString(s string) (int, error) {
 	return w.ResponseWriter.WriteString(s)
 }
 
-// Idempotency makes mutating (POST) requests safe to retry. When a request
-// carries an Idempotency-Key header and a valid bearer token, the first response
-// is stored per (user, key); a retry with the same key replays it verbatim.
-// Reusing a key for a materially different request (different path or body) is
-// rejected with 409. Requests without the header, or from unauthenticated
-// callers, pass through unchanged (downstream auth still applies).
+// Idempotency makes mutating (POST) requests safe to retry SEQUENTIALLY. When a
+// request carries an Idempotency-Key header and a valid bearer token, the first
+// completed response is stored per (user, key); a later retry with the same key
+// replays it verbatim. Reusing a key for a materially different request
+// (different path or body) is rejected with 409. Requests without the header, or
+// from unauthenticated callers, pass through unchanged (downstream auth applies).
+//
+// Guarantee and its limit: this de-duplicates retries that arrive AFTER the first
+// request finished. It does NOT serialize two identical requests that are truly
+// in flight at the same time — both miss the store and execute, and only the
+// second store loses on the unique index. For strict once-only semantics under
+// concurrency, reserve the key with a pending row before c.Next() instead.
 func Idempotency(tokens *auth.Manager, repo *repository.IdempotencyRepo) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.Request.Method != http.MethodPost {

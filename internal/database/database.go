@@ -11,9 +11,16 @@ import (
 	"gorm.io/gorm/logger"
 )
 
+// PoolConfig tunes the underlying database/sql connection pool.
+type PoolConfig struct {
+	MaxOpenConns    int
+	MaxIdleConns    int
+	ConnMaxLifetime time.Duration
+}
+
 // New opens a pooled GORM connection to Postgres and verifies it with a ping.
-// production=true quiets GORM's SQL logging.
-func New(dsn string, production bool) (*gorm.DB, error) {
+// production=true quiets GORM's SQL logging. pool tunes the connection pool.
+func New(dsn string, production bool, pool PoolConfig) (*gorm.DB, error) {
 	logLevel := logger.Info
 	if production {
 		logLevel = logger.Warn
@@ -31,9 +38,9 @@ func New(dsn string, production bool) (*gorm.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("database: sql handle: %w", err)
 	}
-	sqlDB.SetMaxOpenConns(20)
-	sqlDB.SetMaxIdleConns(10)
-	sqlDB.SetConnMaxLifetime(time.Hour)
+	sqlDB.SetMaxOpenConns(pool.MaxOpenConns)
+	sqlDB.SetMaxIdleConns(pool.MaxIdleConns)
+	sqlDB.SetConnMaxLifetime(pool.ConnMaxLifetime)
 
 	if err := Ping(db); err != nil {
 		return nil, err

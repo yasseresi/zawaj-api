@@ -1,3 +1,6 @@
+# Development compose: bundles a throwaway Postgres for local work. Do NOT use in
+# production — see docker-compose.prod.yml, which runs the API alone against a
+# managed/external database.
 services:
   db:
     image: postgres:15-alpine

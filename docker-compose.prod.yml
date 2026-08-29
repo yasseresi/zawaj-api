@@ -1,0 +1,29 @@
+# Production compose: the API only. The database is NOT bundled here — point
+# DATABASE_URL at a managed/external Postgres (RDS, Cloud SQL, Supabase, a
+# dedicated DB host, etc.). Secrets come from the environment (inject via your
+# orchestrator's secret store or a root-owned .env that is never committed).
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Required env (fail-fast if missing): DATABASE_URL, JWT_ACCESS_SECRET,
+# JWT_REFRESH_SECRET, CORS_ALLOWED_ORIGINS.
+services:
+  api:
+    build: .
+    image: zawaj-api:latest
+    restart: unless-stopped
+    environment:
+      APP_ENV: production
+      APP_PORT: "8080"
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL to your managed Postgres}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set JWT_ACCESS_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?set CORS_ALLOWED_ORIGINS}
+      RATE_LIMIT_RPS: ${RATE_LIMIT_RPS:-20}
+      RATE_LIMIT_BURST: ${RATE_LIMIT_BURST:-40}
+      # Optional FCM push (mount the service-account JSON as a secret and point here):
+      # GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/firebase-sa.json
+    ports:
+      - "8080:8080"
+    # Run behind a TLS-terminating reverse proxy / load balancer; do not expose
+    # this port publicly without HTTPS in front.

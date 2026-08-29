@@ -35,7 +35,7 @@ func newApp(t *testing.T) *gin.Engine {
 	}
 	gin.SetMode(gin.TestMode)
 
-	db, err := database.New(dsn, true)
+	db, err := database.New(dsn, true, database.PoolConfig{MaxOpenConns: 10, MaxIdleConns: 5, ConnMaxLifetime: time.Hour})
 	if err != nil {
 		t.Fatalf("connect test db: %v", err)
 	}

@@ -54,7 +54,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	db, err := database.New(cfg.DatabaseURL, cfg.IsProduction())
+	db, err := database.New(cfg.DatabaseURL, cfg.IsProduction(), database.PoolConfig{
+		MaxOpenConns:    cfg.DBMaxOpenConns,
+		MaxIdleConns:    cfg.DBMaxIdleConns,
+		ConnMaxLifetime: cfg.DBConnMaxLifetime,
+	})
 	if err != nil {
 		log.Error("database connect failed", "error", err)
 		os.Exit(1)

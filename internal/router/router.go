@@ -26,16 +26,23 @@ type Module interface {
 }
 
 // New builds the engine with global middleware, health probes, and the given
-// feature modules mounted under /api/v1. corsOrigins is the CORS allowlist.
-func New(db *gorm.DB, log *slog.Logger, production bool, corsOrigins []string, modules ...Module) *gin.Engine {
+// feature modules mounted under /api/v1. corsOrigins is the CORS allowlist;
+// rateRPS/rateBurst configure the per-IP rate limiter (rateRPS <= 0 disables it).
+func New(db *gorm.DB, log *slog.Logger, production bool, corsOrigins []string, rateRPS float64, rateBurst int, modules ...Module) *gin.Engine {
 	if production {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
 	r := gin.New()
+	// Do not trust X-Forwarded-For by default: ClientIP() then reflects the direct
+	// peer, so a client cannot spoof its rate-limit key. Behind a known proxy/LB,
+	// set trusted proxies explicitly in deployment.
+	_ = r.SetTrustedProxies(nil)
+
 	r.Use(
 		middleware.SecurityHeaders(production),
 		middleware.CORS(corsOrigins),
+		middleware.RateLimit(rateRPS, rateBurst),
 		middleware.RequestID(),
 		middleware.Logger(log),
 		middleware.Recover(log),

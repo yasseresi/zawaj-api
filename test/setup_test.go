@@ -56,7 +56,7 @@ func newApp(t *testing.T) *gin.Engine {
 	notifSvc := service.NewNotificationService(notifRepo, weddingRepo, deviceRepo, push.NewNoop(log), log)
 	guestSvc := service.NewGuestService(guestRepo, activitySvc, notifSvc)
 
-	return router.New(db, log, true, []string{"*"},
+	return router.New(db, log, true, []string{"*"}, 0, 0, // rate limiting disabled in tests
 		handler.NewAuth(service.NewAuthService(userRepo, tokens, 5, time.Minute), tokens),
 		handler.NewWedding(service.NewWeddingService(weddingRepo), weddingRepo, tokens),
 		handler.NewGuest(guestSvc, activitySvc, weddingRepo, tokens),

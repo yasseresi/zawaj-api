@@ -30,6 +30,10 @@ type Config struct {
 	// production means no cross-origin browser access (native apps are unaffected,
 	// as they don't send an Origin header the browser enforces).
 	CORSAllowedOrigins []string
+
+	// Rate limiting (per client IP). RateLimitRPS <= 0 disables it.
+	RateLimitRPS   float64
+	RateLimitBurst int
 }
 
 // Load reads configuration from the environment (and an optional .env file for
@@ -48,6 +52,8 @@ func Load() (*Config, error) {
 		JWTRefreshTTL:    durationEnv("JWT_REFRESH_TTL", 720*time.Hour),
 		LoginMaxAttempts: intEnv("LOGIN_MAX_ATTEMPTS", 5),
 		LoginLockout:     durationEnv("LOGIN_LOCKOUT", 15*time.Minute),
+		RateLimitRPS:     floatEnv("RATE_LIMIT_RPS", 20),
+		RateLimitBurst:   intEnv("RATE_LIMIT_BURST", 40),
 	}
 
 	// CORS: explicit allowlist from env; default to wildcard in dev, deny in prod.
@@ -104,6 +110,16 @@ func intEnv(key string, fallback int) int {
 		var n int
 		if _, err := fmt.Sscanf(v, "%d", &n); err == nil {
 			return n
+		}
+	}
+	return fallback
+}
+
+func floatEnv(key string, fallback float64) float64 {
+	if v := os.Getenv(key); v != "" {
+		var f float64
+		if _, err := fmt.Sscanf(v, "%f", &f); err == nil {
+			return f
 		}
 	}
 	return fallback

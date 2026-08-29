@@ -11,18 +11,20 @@ import (
 	"zawaj/pkg/response"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 // Auth is the auth module: it owns /auth/* and /me routes and implements
 // router.Module so main can mount it without editing router.go.
 type Auth struct {
 	svc    *service.AuthService
+	audit  *service.AuditService
 	tokens *auth.Manager
 }
 
 // NewAuth builds the auth handler/module.
-func NewAuth(svc *service.AuthService, tokens *auth.Manager) *Auth {
-	return &Auth{svc: svc, tokens: tokens}
+func NewAuth(svc *service.AuthService, audit *service.AuditService, tokens *auth.Manager) *Auth {
+	return &Auth{svc: svc, audit: audit, tokens: tokens}
 }
 
 // Register mounts the auth routes under the given group.
@@ -87,6 +89,11 @@ func (h *Auth) login(c *gin.Context) {
 	if err != nil {
 		apperr.Write(c, err)
 		return
+	}
+	if resp.User != nil {
+		if uid, err := uuid.Parse(resp.User.ID); err == nil {
+			h.audit.Record(c.Request.Context(), &uid, "login_success", "user", &uid, c.ClientIP(), nil)
+		}
 	}
 	response.JSON(c, http.StatusOK, resp)
 }
@@ -169,6 +176,7 @@ func (h *Auth) logout(c *gin.Context) {
 		apperr.Write(c, err)
 		return
 	}
+	h.audit.Record(c.Request.Context(), nil, "logout", "", nil, c.ClientIP(), nil)
 	response.JSON(c, http.StatusOK, gin.H{"logged_out": true})
 }
 
@@ -230,6 +238,7 @@ func (h *Auth) changePassword(c *gin.Context) {
 		apperr.Write(c, err)
 		return
 	}
+	h.audit.Record(c.Request.Context(), &userID, "password_changed", "user", &userID, c.ClientIP(), nil)
 	response.JSON(c, http.StatusOK, gin.H{"changed": true})
 }
 
@@ -248,6 +257,8 @@ func (h *Auth) deleteMe(c *gin.Context) {
 		apperr.Write(c, err)
 		return
 	}
+	// Audit survives the account (audit_logs is not part of the delete cascade).
+	h.audit.Record(c.Request.Context(), &userID, "account_deleted", "user", &userID, c.ClientIP(), nil)
 	response.JSON(c, http.StatusOK, gin.H{"deleted": true})
 }
 

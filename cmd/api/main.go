@@ -93,12 +93,13 @@ func main() {
 	// (dev/CI); set GOOGLE_APPLICATION_CREDENTIALS to enable real delivery.
 	pusher := push.New(context.Background(), log)
 
+	auditSvc := service.NewAuditService(repository.NewAuditRepo(db), log)
 	activitySvc := service.NewActivityService(activityRepo, log)
 	notifSvc := service.NewNotificationService(notifRepo, weddingRepo, deviceRepo, pusher, log)
 	guestSvc := service.NewGuestService(guestRepo, activitySvc, notifSvc)
 
-	authModule := handler.NewAuth(service.NewAuthService(userRepo, refreshRepo, tokens, cfg.LoginMaxAttempts, cfg.LoginLockout), tokens)
-	weddingModule := handler.NewWedding(service.NewWeddingService(weddingRepo), weddingRepo, tokens)
+	authModule := handler.NewAuth(service.NewAuthService(userRepo, refreshRepo, tokens, cfg.LoginMaxAttempts, cfg.LoginLockout), auditSvc, tokens)
+	weddingModule := handler.NewWedding(service.NewWeddingService(weddingRepo), auditSvc, weddingRepo, tokens)
 	guestModule := handler.NewGuest(guestSvc, activitySvc, weddingRepo, tokens)
 	activityModule := handler.NewActivity(activitySvc, weddingRepo, tokens)
 	statsModule := handler.NewStats(service.NewStatsService(statsRepo), weddingRepo, tokens)

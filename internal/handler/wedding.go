@@ -19,13 +19,14 @@ import (
 // Wedding is the weddings/members/invite-links module.
 type Wedding struct {
 	svc    *service.WeddingService
+	audit  *service.AuditService
 	repo   *repository.WeddingRepo // used by RequireRole middleware
 	tokens *auth.Manager
 }
 
 // NewWedding builds the module.
-func NewWedding(svc *service.WeddingService, repo *repository.WeddingRepo, tokens *auth.Manager) *Wedding {
-	return &Wedding{svc: svc, repo: repo, tokens: tokens}
+func NewWedding(svc *service.WeddingService, audit *service.AuditService, repo *repository.WeddingRepo, tokens *auth.Manager) *Wedding {
+	return &Wedding{svc: svc, audit: audit, repo: repo, tokens: tokens}
 }
 
 // Register mounts wedding routes. Every route requires auth; wedding-scoped
@@ -155,10 +156,13 @@ func (h *Wedding) update(c *gin.Context) {
 // @Failure  403 {object} response.Envelope{error=response.APIError}
 // @Router   /weddings/{id} [delete]
 func (h *Wedding) remove(c *gin.Context) {
-	if err := h.svc.Delete(c.Request.Context(), middleware.WeddingID(c)); err != nil {
+	wid := middleware.WeddingID(c)
+	if err := h.svc.Delete(c.Request.Context(), wid); err != nil {
 		apperr.Write(c, err)
 		return
 	}
+	caller, _ := middleware.UserID(c)
+	h.audit.Record(c.Request.Context(), &caller, "wedding_deleted", "wedding", &wid, c.ClientIP(), nil)
 	response.JSON(c, http.StatusOK, gin.H{"deleted": true})
 }
 
@@ -205,10 +209,14 @@ func (h *Wedding) setRole(c *gin.Context) {
 		apperr.Write(c, apperr.Validation(err.Error()))
 		return
 	}
-	if err := h.svc.SetMemberRole(c.Request.Context(), middleware.WeddingID(c), targetID, req.Role); err != nil {
+	wid := middleware.WeddingID(c)
+	if err := h.svc.SetMemberRole(c.Request.Context(), wid, targetID, req.Role); err != nil {
 		apperr.Write(c, err)
 		return
 	}
+	caller, _ := middleware.UserID(c)
+	h.audit.Record(c.Request.Context(), &caller, "role_changed", "wedding", &wid, c.ClientIP(),
+		service.Meta(map[string]any{"target_user": targetID.String(), "role": req.Role}))
 	response.JSON(c, http.StatusOK, gin.H{"updated": true})
 }
 
@@ -237,10 +245,13 @@ func (h *Wedding) removeMember(c *gin.Context) {
 		apperr.Write(c, apperr.Forbidden("only the owner can remove other members"))
 		return
 	}
-	if err := h.svc.RemoveMember(c.Request.Context(), middleware.WeddingID(c), targetID); err != nil {
+	wid := middleware.WeddingID(c)
+	if err := h.svc.RemoveMember(c.Request.Context(), wid, targetID); err != nil {
 		apperr.Write(c, err)
 		return
 	}
+	h.audit.Record(c.Request.Context(), &callerID, "member_removed", "wedding", &wid, c.ClientIP(),
+		service.Meta(map[string]any{"target_user": targetID.String()}))
 	response.JSON(c, http.StatusOK, gin.H{"removed": true})
 }
 
@@ -349,10 +360,13 @@ func (h *Wedding) transferOwnership(c *gin.Context) {
 		apperr.Write(c, apperr.Validation("invalid user_id"))
 		return
 	}
-	if err := h.svc.TransferOwnership(c.Request.Context(), middleware.WeddingID(c), callerID, newOwner); err != nil {
+	wid := middleware.WeddingID(c)
+	if err := h.svc.TransferOwnership(c.Request.Context(), wid, callerID, newOwner); err != nil {
 		apperr.Write(c, err)
 		return
 	}
+	h.audit.Record(c.Request.Context(), &callerID, "ownership_transferred", "wedding", &wid, c.ClientIP(),
+		service.Meta(map[string]any{"new_owner": newOwner.String()}))
 	response.JSON(c, http.StatusOK, gin.H{"transferred": true})
 }
 

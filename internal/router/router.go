@@ -12,6 +12,7 @@ import (
 	"zawaj/internal/middleware"
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"gorm.io/gorm"
 )
 
@@ -40,6 +41,7 @@ func New(db *gorm.DB, log *slog.Logger, production bool, corsOrigins []string, r
 	_ = r.SetTrustedProxies(nil)
 
 	r.Use(
+		middleware.Metrics(),
 		middleware.SecurityHeaders(production),
 		middleware.CORS(corsOrigins),
 		middleware.RateLimit(rateRPS, rateBurst),
@@ -52,6 +54,9 @@ func New(db *gorm.DB, log *slog.Logger, production bool, corsOrigins []string, r
 	health := handler.NewHealth(db)
 	r.GET("/healthz", health.Live)
 	r.GET("/readyz", health.Ready)
+	// Prometheus scrape endpoint. Restrict access at the network/proxy layer
+	// (internal-only) rather than exposing it publicly.
+	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 	api := r.Group("/api/v1")
 	for _, m := range modules {

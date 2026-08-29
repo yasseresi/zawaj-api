@@ -91,13 +91,35 @@ func SecurityHeaders(production bool) gin.HandlerFunc {
 	}
 }
 
-// CORS applies permissive CORS suitable for a mobile client and local dev.
-func CORS() gin.HandlerFunc {
+// CORS reflects the request Origin only when it is in the allowlist. A single
+// "*" entry allows any origin (dev). An empty allowlist sends no CORS headers,
+// so browsers block cross-origin requests (native apps are unaffected). Requests
+// without an Origin header (server-to-server, native clients) always pass.
+func CORS(allowedOrigins []string) gin.HandlerFunc {
+	wildcard := false
+	allow := make(map[string]struct{}, len(allowedOrigins))
+	for _, o := range allowedOrigins {
+		if o == "*" {
+			wildcard = true
+		}
+		allow[o] = struct{}{}
+	}
+
 	return func(c *gin.Context) {
+		origin := c.GetHeader("Origin")
+		if origin != "" {
+			if wildcard {
+				c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+			} else if _, ok := allow[origin]; ok {
+				h := c.Writer.Header()
+				h.Set("Access-Control-Allow-Origin", origin)
+				h.Add("Vary", "Origin")
+			}
+		}
 		h := c.Writer.Header()
-		h.Set("Access-Control-Allow-Origin", "*")
 		h.Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
 		h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Request-ID")
+
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
 			return

@@ -93,7 +93,7 @@ func main() {
 	exportModule := handler.NewExport(guestRepo, weddingRepo, tokens)
 	deviceModule := handler.NewDevice(deviceRepo, tokens)
 
-	r := router.New(db, log, cfg.IsProduction(),
+	r := router.New(db, log, cfg.IsProduction(), cfg.CORSAllowedOrigins,
 		authModule, weddingModule, guestModule,
 		activityModule, statsModule, notifModule, exportModule,
 		deviceModule,

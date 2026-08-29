@@ -26,8 +26,8 @@ type Module interface {
 }
 
 // New builds the engine with global middleware, health probes, and the given
-// feature modules mounted under /api/v1.
-func New(db *gorm.DB, log *slog.Logger, production bool, modules ...Module) *gin.Engine {
+// feature modules mounted under /api/v1. corsOrigins is the CORS allowlist.
+func New(db *gorm.DB, log *slog.Logger, production bool, corsOrigins []string, modules ...Module) *gin.Engine {
 	if production {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -35,7 +35,7 @@ func New(db *gorm.DB, log *slog.Logger, production bool, modules ...Module) *gin
 	r := gin.New()
 	r.Use(
 		middleware.SecurityHeaders(production),
-		middleware.CORS(),
+		middleware.CORS(corsOrigins),
 		middleware.RequestID(),
 		middleware.Logger(log),
 		middleware.Recover(log),

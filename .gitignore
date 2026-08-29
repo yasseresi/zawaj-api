@@ -21,3 +21,6 @@ graphify-out/
 
 # agent worktrees
 .claude/
+
+# Operator runbook (local only, may reference infra)
+PRODUCTION_SETUP.md

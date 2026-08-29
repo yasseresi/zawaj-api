@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const (
@@ -36,13 +37,18 @@ func Logger(log *slog.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
 		c.Next()
-		log.Info("request",
+		attrs := []any{
 			"method", c.Request.Method,
 			"path", c.Request.URL.Path,
 			"status", c.Writer.Status(),
 			"duration_ms", time.Since(start).Milliseconds(),
 			"request_id", c.GetString(ctxRequestID),
-		)
+		}
+		// Correlate logs with traces when tracing is active.
+		if sc := trace.SpanContextFromContext(c.Request.Context()); sc.HasTraceID() {
+			attrs = append(attrs, "trace_id", sc.TraceID().String())
+		}
+		log.Info("request", attrs...)
 	}
 }
 

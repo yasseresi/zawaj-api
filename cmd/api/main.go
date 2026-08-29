@@ -34,6 +34,7 @@ import (
 	"zawaj/internal/config"
 	"zawaj/internal/database"
 	"zawaj/internal/handler"
+	"zawaj/internal/observability"
 	"zawaj/internal/push"
 	"zawaj/internal/repository"
 	"zawaj/internal/router"
@@ -67,6 +68,13 @@ func main() {
 	if err := database.RunMigrations(cfg.DatabaseURL); err != nil {
 		log.Error("migration failed", "error", err)
 		os.Exit(1)
+	}
+
+	// Optional distributed tracing (no-op unless OTEL_EXPORTER_OTLP_ENDPOINT is set).
+	shutdownTracing, err := observability.InitTracing(context.Background(), "zawaj-api", log)
+	if err != nil {
+		log.Warn("tracing init failed; continuing without tracing", "error", err)
+		shutdownTracing = func(context.Context) error { return nil }
 	}
 
 	// Dependency wiring. Feature modules are appended to the router as phases land.
@@ -136,6 +144,9 @@ func main() {
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Error("graceful shutdown failed", "error", err)
+	}
+	if err := shutdownTracing(ctx); err != nil {
+		log.Error("tracing shutdown failed", "error", err)
 	}
 	if sqlDB, err := db.DB(); err == nil {
 		_ = sqlDB.Close()

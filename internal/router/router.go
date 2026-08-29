@@ -13,8 +13,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 	"gorm.io/gorm"
 )
+
+// serviceName labels traces for this service.
+const serviceName = "zawaj-api"
 
 // requestTimeout bounds how long any single request may run before its context
 // is cancelled (propagated to DB queries). Well above p95 for v1 workloads.
@@ -41,6 +45,7 @@ func New(db *gorm.DB, log *slog.Logger, production bool, corsOrigins []string, r
 	_ = r.SetTrustedProxies(nil)
 
 	r.Use(
+		otelgin.Middleware(serviceName), // no-op unless a tracer provider is configured
 		middleware.Metrics(),
 		middleware.SecurityHeaders(production),
 		middleware.CORS(corsOrigins),

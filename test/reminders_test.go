@@ -40,10 +40,21 @@ func TestReminders(t *testing.T) {
 	items, _ := dataOf(ab)["items"].([]any)
 	found := false
 	for _, it := range items {
-		if m, ok := it.(map[string]any); ok && m["action"] == "reminders_sent" {
-			found = true
-			break
+		m, ok := it.(map[string]any)
+		if !ok || m["action"] != "reminders_sent" {
+			continue
 		}
+		found = true
+		// Feed is enriched with the actor's display name.
+		if m["actor_name"] != "sarah" {
+			t.Fatalf("reminders_sent actor_name: want sarah, got %v", m["actor_name"])
+		}
+		// Meta serializes as a real JSON object (not base64) carrying the count.
+		meta, _ := m["meta"].(map[string]any)
+		if meta == nil || meta["count"].(float64) != 2 {
+			t.Fatalf("reminders_sent meta.count: want 2, got %v", m["meta"])
+		}
+		break
 	}
 	if !found {
 		t.Fatalf("expected reminders_sent activity entry, feed: %v", items)

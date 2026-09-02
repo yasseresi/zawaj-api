@@ -51,12 +51,12 @@ func (s *ActivityService) Feed(ctx context.Context, weddingID uuid.UUID, limit, 
 
 // FeedCursor returns a wedding's activity newest-first with keyset pagination.
 // It returns the page and an opaque next cursor ("" when there are no more rows).
-func (s *ActivityService) FeedCursor(ctx context.Context, weddingID uuid.UUID, cursor string, limit int) ([]models.ActivityLog, string, error) {
+func (s *ActivityService) FeedCursor(ctx context.Context, weddingID uuid.UUID, cursor string, limit int) ([]repository.ActivityFeedRow, string, error) {
 	cur, has, err := pagination.Decode(cursor)
 	if err != nil {
 		return nil, "", apperr.Validation("invalid cursor")
 	}
-	items, err := s.repo.ListByWeddingKeyset(ctx, weddingID, has, cur.CreatedAt, cur.ID, limit)
+	items, err := s.repo.ListFeedKeyset(ctx, weddingID, has, cur.CreatedAt, cur.ID, limit)
 	if err != nil {
 		return nil, "", apperr.Internal("activity feed failed")
 	}

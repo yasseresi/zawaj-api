@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"zawaj/internal/apperr"
 	"zawaj/internal/dto"
@@ -129,7 +130,7 @@ func (s *GuestService) Update(ctx context.Context, weddingID, actorID, guestID u
 		return nil, apperr.Internal("update guest failed")
 	}
 	if statusChanged {
-		s.record(ctx, weddingID, actorID, &g.ID, models.ActGuestStatusChange)
+		s.recordStatusChange(ctx, weddingID, actorID, g.ID, g.Status)
 		s.notifyMembers(ctx, weddingID, actorID, "guest_status_changed", "تحديث حالة ضيف", g.FullName)
 	} else {
 		s.record(ctx, weddingID, actorID, &g.ID, models.ActGuestUpdated)
@@ -151,7 +152,7 @@ func (s *GuestService) SetStatus(ctx context.Context, weddingID, actorID, guestI
 	if err := s.guests.Update(ctx, g); err != nil {
 		return nil, apperr.Internal("update status failed")
 	}
-	s.record(ctx, weddingID, actorID, &g.ID, models.ActGuestStatusChange)
+	s.recordStatusChange(ctx, weddingID, actorID, g.ID, g.Status)
 	s.notifyMembers(ctx, weddingID, actorID, "guest_status_changed", "تحديث حالة ضيف", g.FullName)
 	return g, nil
 }
@@ -191,6 +192,16 @@ func (s *GuestService) load(ctx context.Context, weddingID, guestID uuid.UUID) (
 		return nil, apperr.Internal("load guest failed")
 	}
 	return g, nil
+}
+
+// recordStatusChange records a status change carrying the new status in meta so
+// the activity feed can distinguish confirmed / declined / pending entries.
+func (s *GuestService) recordStatusChange(ctx context.Context, weddingID, actorID uuid.UUID, guestID uuid.UUID, status models.RSVPStatus) {
+	s.activity.Record(ctx, events.Activity{
+		WeddingID: weddingID, ActorID: actorID, GuestID: &guestID,
+		Action: models.ActGuestStatusChange,
+		Meta:   models.JSON(fmt.Sprintf(`{"status":%q}`, string(status))),
+	})
 }
 
 func (s *GuestService) record(ctx context.Context, weddingID, actorID uuid.UUID, guestID *uuid.UUID, action models.ActivityAction) {

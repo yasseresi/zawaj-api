@@ -106,12 +106,15 @@ func main() {
 	notifModule := handler.NewNotification(notifSvc, tokens)
 	exportModule := handler.NewExport(guestRepo, weddingRepo, tokens)
 	deviceModule := handler.NewDevice(deviceRepo, tokens)
+	inviteModule := handler.NewInvite(
+		service.NewInviteService(repository.NewInviteRepo(db), weddingRepo, userRepo, activitySvc),
+		weddingRepo, tokens)
 
 	r := router.New(db, log, cfg.IsProduction(), cfg.CORSAllowedOrigins, cfg.RateLimitRPS, cfg.RateLimitBurst,
 		tokens, repository.NewIdempotencyRepo(db),
 		authModule, weddingModule, guestModule,
 		activityModule, statsModule, notifModule, exportModule,
-		deviceModule,
+		deviceModule, inviteModule,
 	)
 
 	// Swagger UI at /swagger/index.html. Off in production unless ENABLE_SWAGGER=true,

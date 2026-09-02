@@ -20,6 +20,27 @@ type InviteLink struct {
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }
 
+// InviteStatus is the lifecycle of a targeted collaborator invite (screen 10).
+type InviteStatus string
+
+const (
+	InvitePending  InviteStatus = "pending"
+	InviteAccepted InviteStatus = "accepted"
+	InviteDeclined InviteStatus = "declined"
+)
+
+// WeddingInvite is a targeted invitation for a specific registered user to join
+// a wedding with a role. Distinct from InviteLink (shareable token): here the
+// recipient sees a "pending invites" list and accepts or declines.
+type WeddingInvite struct {
+	Base
+	WeddingID uuid.UUID    `gorm:"type:uuid;not null" json:"wedding_id"`
+	InviterID uuid.UUID    `gorm:"type:uuid;not null" json:"inviter_id"`
+	InviteeID uuid.UUID    `gorm:"type:uuid;not null;index" json:"invitee_id"`
+	Role      Role         `gorm:"size:10;not null" json:"role"`   // editor | viewer (never owner)
+	Status    InviteStatus `gorm:"size:10;not null" json:"status"` // pending | accepted | declined
+}
+
 // ActivityAction enumerates entries in the activity feed / per-guest history.
 type ActivityAction string
 

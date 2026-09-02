@@ -19,6 +19,13 @@ type CreateInviteLinkRequest struct {
 	Role string `json:"role" binding:"required,oneof=editor viewer"`
 }
 
+// InviteUserRequest invites a specific registered user (by username) to join a
+// wedding with a role. Role is editor|viewer.
+type InviteUserRequest struct {
+	Username string `json:"username" binding:"required,max=120"`
+	Role     string `json:"role" binding:"required,oneof=editor viewer"`
+}
+
 // SetRoleRequest changes a member's role.
 type SetRoleRequest struct {
 	Role string `json:"role" binding:"required,oneof=editor viewer"`

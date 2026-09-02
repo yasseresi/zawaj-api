@@ -88,6 +88,20 @@ definitions:
     required:
     - name
     type: object
+  zawaj_internal_dto.InviteUserRequest:
+    properties:
+      role:
+        enum:
+        - editor
+        - viewer
+        type: string
+      username:
+        maxLength: 120
+        type: string
+    required:
+    - role
+    - username
+    type: object
   zawaj_internal_dto.LoginRequest:
     properties:
       password:
@@ -638,6 +652,77 @@ paths:
       security:
       - BearerAuth: []
       summary: Accept an invite
+      tags:
+      - invites
+  /invites:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: '{ items: [...] }'
+          schema:
+            $ref: '#/definitions/zawaj_pkg_response.Envelope'
+      security:
+      - BearerAuth: []
+      summary: My pending invites
+      tags:
+      - invites
+  /invites/{inviteId}/accept:
+    post:
+      description: Grants the caller membership per the invite's role.
+      parameters:
+      - description: Invite ID
+        in: path
+        name: inviteId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/zawaj_pkg_response.Envelope'
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/zawaj_pkg_response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/zawaj_pkg_response.APIError'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Accept an invite
+      tags:
+      - invites
+  /invites/{inviteId}/decline:
+    post:
+      parameters:
+      - description: Invite ID
+        in: path
+        name: inviteId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/zawaj_pkg_response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/zawaj_pkg_response.APIError'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Decline an invite
       tags:
       - invites
   /me:
@@ -1848,6 +1933,62 @@ paths:
       summary: Revoke an invite link (owner only)
       tags:
       - invite-links
+  /weddings/{id}/invites:
+    post:
+      consumes:
+      - application/json
+      description: Owner invites a registered user (by username) with a role (editor|viewer).
+      parameters:
+      - description: Wedding ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Invite
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/zawaj_internal_dto.InviteUserRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/zawaj_pkg_response.Envelope'
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/zawaj_pkg_response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/zawaj_pkg_response.APIError'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/zawaj_pkg_response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/zawaj_pkg_response.APIError'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/zawaj_pkg_response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/zawaj_pkg_response.APIError'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Invite a user to a wedding
+      tags:
+      - invites
   /weddings/{id}/members:
     get:
       parameters:

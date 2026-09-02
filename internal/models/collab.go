@@ -30,6 +30,7 @@ const (
 	ActNoteAdded         ActivityAction = "note_added"
 	ActCollaboratorJoin  ActivityAction = "collaborator_joined"
 	ActListExported      ActivityAction = "list_exported"
+	ActRemindersSent     ActivityAction = "reminders_sent"
 )
 
 // ActivityLog powers the wedding activity feed (screen 9) and per-guest history

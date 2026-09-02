@@ -32,6 +32,9 @@ func (h *Stats) Register(rg *gin.RouterGroup) {
 
 	g := rg.Group("/weddings/:id/stats", middleware.RequireAuth(h.tokens))
 	g.GET("", middleware.RequireRole(h.repo, viewer), h.get)
+
+	r := rg.Group("/weddings/:id/reminders", middleware.RequireAuth(h.tokens))
+	r.POST("", middleware.RequireRole(h.repo, models.RoleEditor), h.sendReminders)
 }
 
 // get godoc
@@ -51,4 +54,24 @@ func (h *Stats) get(c *gin.Context) {
 		return
 	}
 	response.JSON(c, http.StatusOK, res)
+}
+
+// sendReminders godoc
+// @Summary  Send reminders to pending guests
+// @Description Records a broadcast reminder targeting all pending guests and returns the count. Editor role required.
+// @Tags     stats
+// @Produce  json
+// @Security BearerAuth
+// @Param    id path string true "Wedding ID"
+// @Success  200 {object} response.Envelope "{ count: int }"
+// @Failure  403 {object} response.Envelope{error=response.APIError}
+// @Router   /weddings/{id}/reminders [post]
+func (h *Stats) sendReminders(c *gin.Context) {
+	userID, _ := middleware.UserID(c)
+	count, err := h.svc.SendReminders(c.Request.Context(), middleware.WeddingID(c), userID)
+	if err != nil {
+		apperr.Write(c, err)
+		return
+	}
+	response.JSON(c, http.StatusOK, gin.H{"count": count})
 }

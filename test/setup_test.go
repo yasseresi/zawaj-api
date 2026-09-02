@@ -62,7 +62,7 @@ func newApp(t *testing.T) *gin.Engine {
 		handler.NewWedding(service.NewWeddingService(weddingRepo), auditSvc, weddingRepo, tokens),
 		handler.NewGuest(guestSvc, activitySvc, weddingRepo, tokens),
 		handler.NewActivity(activitySvc, weddingRepo, tokens),
-		handler.NewStats(service.NewStatsService(statsRepo), weddingRepo, tokens),
+		handler.NewStats(service.NewStatsService(statsRepo, activitySvc), weddingRepo, tokens),
 		handler.NewNotification(notifSvc, tokens),
 		handler.NewExport(guestRepo, weddingRepo, tokens),
 		handler.NewDevice(deviceRepo, tokens),

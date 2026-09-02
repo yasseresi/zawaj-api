@@ -102,7 +102,7 @@ func main() {
 	weddingModule := handler.NewWedding(service.NewWeddingService(weddingRepo), auditSvc, weddingRepo, tokens)
 	guestModule := handler.NewGuest(guestSvc, activitySvc, weddingRepo, tokens)
 	activityModule := handler.NewActivity(activitySvc, weddingRepo, tokens)
-	statsModule := handler.NewStats(service.NewStatsService(statsRepo), weddingRepo, tokens)
+	statsModule := handler.NewStats(service.NewStatsService(statsRepo, activitySvc), weddingRepo, tokens)
 	notifModule := handler.NewNotification(notifSvc, tokens)
 	exportModule := handler.NewExport(guestRepo, weddingRepo, tokens)
 	deviceModule := handler.NewDevice(deviceRepo, tokens)

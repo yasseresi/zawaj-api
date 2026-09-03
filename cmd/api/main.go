@@ -107,7 +107,7 @@ func main() {
 	exportModule := handler.NewExport(guestRepo, weddingRepo, tokens)
 	deviceModule := handler.NewDevice(deviceRepo, tokens)
 	inviteModule := handler.NewInvite(
-		service.NewInviteService(repository.NewInviteRepo(db), weddingRepo, userRepo, activitySvc),
+		service.NewInviteService(repository.NewInviteRepo(db), weddingRepo, userRepo, activitySvc, notifSvc),
 		weddingRepo, tokens)
 
 	r := router.New(db, log, cfg.IsProduction(), cfg.CORSAllowedOrigins, cfg.RateLimitRPS, cfg.RateLimitBurst,

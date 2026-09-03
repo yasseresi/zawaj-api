@@ -74,6 +74,30 @@ func (s *NotificationService) Notify(ctx context.Context, n events.Note) {
 	s.pushToDevices(recipients, n)
 }
 
+// NotifyUser delivers a single notification to one user (e.g. an invite to a
+// user who is not yet a member, so the member fan-out in Notify would miss
+// them). Fire-and-forget: on error it logs and returns.
+func (s *NotificationService) NotifyUser(ctx context.Context, userID uuid.UUID, n events.Note) {
+	var weddingID *uuid.UUID
+	if n.WeddingID != uuid.Nil {
+		w := n.WeddingID
+		weddingID = &w
+	}
+	row := models.Notification{
+		UserID:    userID,
+		WeddingID: weddingID,
+		Type:      n.Type,
+		Title:     n.Title,
+		Body:      n.Body,
+		Data:      n.Data,
+	}
+	if err := s.notifs.Create(ctx, &row); err != nil {
+		s.log.Error("notify user: create notification failed", "error", err, "user_id", userID, "type", n.Type)
+		return
+	}
+	s.pushToDevices([]uuid.UUID{userID}, n)
+}
+
 // pushToDevices delivers a fan-out as FCM push to recipients who have push
 // enabled. It runs detached from the request (its own timeout) and prunes tokens
 // FCM reports as invalid. Best-effort: failures are logged, never surfaced.

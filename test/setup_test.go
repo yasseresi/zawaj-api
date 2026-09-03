@@ -67,7 +67,7 @@ func newApp(t *testing.T) *gin.Engine {
 		handler.NewExport(guestRepo, weddingRepo, tokens),
 		handler.NewDevice(deviceRepo, tokens),
 		handler.NewInvite(
-			service.NewInviteService(repository.NewInviteRepo(db), weddingRepo, userRepo, activitySvc),
+			service.NewInviteService(repository.NewInviteRepo(db), weddingRepo, userRepo, activitySvc, notifSvc),
 			weddingRepo, tokens),
 	)
 }

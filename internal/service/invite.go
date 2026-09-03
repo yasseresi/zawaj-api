@@ -20,11 +20,12 @@ type InviteService struct {
 	weddings *repository.WeddingRepo
 	users    *repository.UserRepo
 	activity events.Recorder
+	notify   events.UserNotifier
 }
 
 // NewInviteService builds the service.
-func NewInviteService(invites *repository.InviteRepo, weddings *repository.WeddingRepo, users *repository.UserRepo, activity events.Recorder) *InviteService {
-	return &InviteService{invites: invites, weddings: weddings, users: users, activity: activity}
+func NewInviteService(invites *repository.InviteRepo, weddings *repository.WeddingRepo, users *repository.UserRepo, activity events.Recorder, notify events.UserNotifier) *InviteService {
+	return &InviteService{invites: invites, weddings: weddings, users: users, activity: activity, notify: notify}
 }
 
 // Invite creates a pending invite for [username] to join [weddingID] with [role]
@@ -64,6 +65,19 @@ func (s *InviteService) Invite(ctx context.Context, weddingID, inviterID uuid.UU
 	if err := s.invites.Create(ctx, inv); err != nil {
 		return nil, apperr.Internal("create invite failed")
 	}
+	// Notify the invitee (not yet a member, so the member fan-out would miss
+	// them). Best-effort: a wedding-title lookup failure must not fail the invite.
+	body := ""
+	if w, werr := s.weddings.ByID(ctx, weddingID); werr == nil {
+		body = w.Name
+	}
+	s.notify.NotifyUser(ctx, invitee.ID, events.Note{
+		WeddingID: weddingID,
+		ActorID:   inviterID,
+		Type:      "invite_received",
+		Title:     "دعوة جديدة",
+		Body:      body,
+	})
 	return inv, nil
 }
 

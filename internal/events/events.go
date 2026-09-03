@@ -54,3 +54,15 @@ type NoopNotifier struct{}
 
 // Notify does nothing.
 func (NoopNotifier) Notify(context.Context, Note) {}
+
+// UserNotifier delivers a notification to a single named user (not a wedding
+// fan-out). Used for invites, where the recipient is not yet a member.
+type UserNotifier interface {
+	NotifyUser(ctx context.Context, userID uuid.UUID, n Note)
+}
+
+// NoopUserNotifier discards user notifications.
+type NoopUserNotifier struct{}
+
+// NotifyUser does nothing.
+func (NoopUserNotifier) NotifyUser(context.Context, uuid.UUID, Note) {}

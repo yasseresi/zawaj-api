@@ -2136,37 +2136,6 @@ paths:
       summary: Change a member's role (owner only)
       tags:
       - members
-  /weddings/{id}/reminders:
-    post:
-      description: Records a broadcast reminder targeting all pending guests and returns
-        the count. Editor role required.
-      parameters:
-      - description: Wedding ID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: '{ count: int }'
-          schema:
-            $ref: '#/definitions/zawaj_pkg_response.Envelope'
-        "403":
-          description: Forbidden
-          schema:
-            allOf:
-            - $ref: '#/definitions/zawaj_pkg_response.Envelope'
-            - properties:
-                error:
-                  $ref: '#/definitions/zawaj_pkg_response.APIError'
-              type: object
-      security:
-      - BearerAuth: []
-      summary: Send reminders to pending guests
-      tags:
-      - stats
   /weddings/{id}/stats:
     get:
       description: Counts by RSVP status, companions, and totals for a wedding.

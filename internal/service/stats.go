@@ -2,11 +2,8 @@ package service
 
 import (
 	"context"
-	"fmt"
 
 	"zawaj/internal/apperr"
-	"zawaj/internal/events"
-	"zawaj/internal/models"
 	"zawaj/internal/repository"
 
 	"github.com/google/uuid"
@@ -14,13 +11,12 @@ import (
 
 // StatsService computes a wedding's analytics figures (screen 8).
 type StatsService struct {
-	repo     *repository.StatsRepo
-	activity events.Recorder
+	repo *repository.StatsRepo
 }
 
 // NewStatsService builds the service.
-func NewStatsService(repo *repository.StatsRepo, activity events.Recorder) *StatsService {
-	return &StatsService{repo: repo, activity: activity}
+func NewStatsService(repo *repository.StatsRepo) *StatsService {
+	return &StatsService{repo: repo}
 }
 
 // StatusBreakdown is the per-status guest count.
@@ -54,25 +50,4 @@ func (s *StatsService) Guests(ctx context.Context, weddingID uuid.UUID) (*StatsR
 		TotalPeople:    stats.TotalPeople,
 		ConfirmedSeats: stats.ConfirmedSeats,
 	}, nil
-}
-
-// SendReminders records a broadcast-reminder action for every pending guest and
-// returns how many guests it targeted (screen 8 "Send Reminders"). Delivery to
-// guests (SMS/email) is out of scope here; this establishes the count and the
-// audited activity entry the feed and analytics screen rely on.
-func (s *StatsService) SendReminders(ctx context.Context, weddingID, actorID uuid.UUID) (int64, error) {
-	stats, err := s.repo.Guests(ctx, weddingID)
-	if err != nil {
-		return 0, apperr.Internal("guest stats failed")
-	}
-	count := stats.Pending
-	if count > 0 {
-		s.activity.Record(ctx, events.Activity{
-			WeddingID: weddingID,
-			ActorID:   actorID,
-			Action:    models.ActRemindersSent,
-			Meta:      models.JSON(fmt.Sprintf(`{"count":%d}`, count)),
-		})
-	}
-	return count, nil
 }

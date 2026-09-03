@@ -3327,58 +3327,6 @@
                 }
             }
         },
-        "/weddings/{id}/reminders": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Records a broadcast reminder targeting all pending guests and returns the count. Editor role required.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "stats"
-                ],
-                "summary": "Send reminders to pending guests",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Wedding ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "{ count: int }",
-                        "schema": {
-                            "$ref": "#/definitions/zawaj_pkg_response.Envelope"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/zawaj_pkg_response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/zawaj_pkg_response.APIError"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    }
-                }
-            }
-        },
         "/weddings/{id}/stats": {
             "get": {
                 "security": [

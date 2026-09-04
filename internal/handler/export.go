@@ -18,6 +18,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-pdf/fpdf"
+	"github.com/go-typeset/bidi"
 	"github.com/xuri/excelize/v2"
 )
 
@@ -130,8 +131,7 @@ func (h *Export) guestsXLSX(c *gin.Context) {
 		response.Error(c, http.StatusInternalServerError, response.CodeInternal, "export failed")
 		return
 	}
-	c.Data(http.StatusOK, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", out.Bytes())
-	c.Header("Content-Disposition", `attachment; filename="guests.xlsx"`)
+	writeDownload(c, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", `attachment; filename="guests.xlsx"`, out.Bytes())
 	h.recordExport(c)
 }
 
@@ -145,7 +145,6 @@ func (h *Export) guestsPDF(c *gin.Context) {
 	}
 	pdf := fpdf.New("P", "mm", "A4", "")
 	pdf.AddUTF8FontFromBytes("dejavu", "", dejavuFont)
-	pdf.RTL()
 	pdf.SetTitle("Zawaj guest list", false)
 	pdf.AddPage()
 	pdf.SetFont("dejavu", "", 14)
@@ -153,16 +152,33 @@ func (h *Export) guestsPDF(c *gin.Context) {
 	pdf.SetFont("dejavu", "", 8)
 	for _, guest := range guests {
 		line := fmt.Sprintf("%s | %s | %s | %s | %d | %s | %s", guest.FullName, guest.Contact, guest.Relationship, guest.Status, guest.Companions, guest.TableLabel, guest.Meal)
-		pdf.MultiCell(0, 5, line, "", "L", false)
+		pdf.MultiCell(0, 5, shapeArabic(line), "", "L", false)
 	}
 	var out bytes.Buffer
 	if err := pdf.Output(&out); err != nil {
 		response.Error(c, http.StatusInternalServerError, response.CodeInternal, "export failed")
 		return
 	}
-	c.Data(http.StatusOK, "application/pdf", out.Bytes())
-	c.Header("Content-Disposition", `attachment; filename="guests.pdf"`)
+	writeDownload(c, "application/pdf", `attachment; filename="guests.pdf"`, out.Bytes())
 	h.recordExport(c)
+}
+
+func writeDownload(c *gin.Context, contentType, disposition string, body []byte) {
+	c.Header("Content-Type", contentType)
+	c.Header("Content-Disposition", disposition)
+	c.Data(http.StatusOK, contentType, body)
+}
+
+// shapeArabic converts Arabic joining forms to presentation forms, then puts
+// the paragraph in visual order for fpdf's left-to-right text writer. Latin
+// usernames and separators remain readable in the mixed guest-list line.
+func shapeArabic(text string) string {
+	runes := []rune(text)
+	forms := bidi.JoinForms(runes)
+	for i, r := range runes {
+		runes[i] = bidi.PresentationForm(r, forms[i])
+	}
+	return bidi.VisualOrder(string(runes), bidi.RightToLeft)
 }
 
 func (h *Export) recordExport(c *gin.Context) {

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	_ "embed"
 	"encoding/csv"
 	"fmt"
 	"net/http"
@@ -19,6 +20,12 @@ import (
 	"github.com/go-pdf/fpdf"
 	"github.com/xuri/excelize/v2"
 )
+
+// DejaVu Sans includes Arabic glyphs and is embedded in the PDF response so
+// deployed API instances do not depend on a host machine's font directory.
+//
+//go:embed assets/DejaVuSansCondensed.ttf
+var dejavuFont []byte
 
 // Export is the CSV export module, mounted under /weddings/:id/export.csv.
 // It reuses the guest repo directly (thin passthrough — no service needed).
@@ -137,11 +144,13 @@ func (h *Export) guestsPDF(c *gin.Context) {
 		return
 	}
 	pdf := fpdf.New("P", "mm", "A4", "")
+	pdf.AddUTF8FontFromBytes("dejavu", "", dejavuFont)
+	pdf.RTL()
 	pdf.SetTitle("Zawaj guest list", false)
 	pdf.AddPage()
-	pdf.SetFont("Arial", "B", 14)
+	pdf.SetFont("dejavu", "", 14)
 	pdf.CellFormat(0, 10, "Zawaj guest list", "", 1, "L", false, 0, "")
-	pdf.SetFont("Arial", "", 8)
+	pdf.SetFont("dejavu", "", 8)
 	for _, guest := range guests {
 		line := fmt.Sprintf("%s | %s | %s | %s | %d | %s | %s", guest.FullName, guest.Contact, guest.Relationship, guest.Status, guest.Companions, guest.TableLabel, guest.Meal)
 		pdf.MultiCell(0, 5, line, "", "L", false)

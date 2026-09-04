@@ -104,7 +104,7 @@ func main() {
 	activityModule := handler.NewActivity(activitySvc, weddingRepo, tokens)
 	statsModule := handler.NewStats(service.NewStatsService(statsRepo), weddingRepo, tokens)
 	notifModule := handler.NewNotification(notifSvc, tokens)
-	exportModule := handler.NewExport(guestRepo, weddingRepo, tokens)
+	exportModule := handler.NewExport(guestRepo, weddingRepo, tokens, activitySvc)
 	deviceModule := handler.NewDevice(deviceRepo, tokens)
 	inviteModule := handler.NewInvite(
 		service.NewInviteService(repository.NewInviteRepo(db), weddingRepo, userRepo, activitySvc, notifSvc),

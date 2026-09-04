@@ -1,30 +1,37 @@
 package handler
 
 import (
+	"bytes"
 	"encoding/csv"
+	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"zawaj/internal/auth"
+	"zawaj/internal/events"
 	"zawaj/internal/middleware"
 	"zawaj/internal/models"
 	"zawaj/internal/repository"
 	"zawaj/pkg/response"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-pdf/fpdf"
+	"github.com/xuri/excelize/v2"
 )
 
 // Export is the CSV export module, mounted under /weddings/:id/export.csv.
 // It reuses the guest repo directly (thin passthrough — no service needed).
 type Export struct {
-	guests *repository.GuestRepo
-	repo   *repository.WeddingRepo // for RequireRole
-	tokens *auth.Manager
+	guests   *repository.GuestRepo
+	repo     *repository.WeddingRepo // for RequireRole
+	tokens   *auth.Manager
+	activity events.Recorder
 }
 
 // NewExport builds the module.
-func NewExport(guests *repository.GuestRepo, repo *repository.WeddingRepo, tokens *auth.Manager) *Export {
-	return &Export{guests: guests, repo: repo, tokens: tokens}
+func NewExport(guests *repository.GuestRepo, repo *repository.WeddingRepo, tokens *auth.Manager, activity events.Recorder) *Export {
+	return &Export{guests: guests, repo: repo, tokens: tokens, activity: activity}
 }
 
 // Register mounts the export route. Any member (viewer+) may download.
@@ -34,6 +41,8 @@ func (h *Export) Register(rg *gin.RouterGroup) {
 		middleware.RequireRole(h.repo, models.RoleViewer),
 		h.guestsCSV,
 	)
+	rg.GET("/weddings/:id/export.xlsx", middleware.RequireAuth(h.tokens), middleware.RequireRole(h.repo, models.RoleViewer), h.guestsXLSX)
+	rg.GET("/weddings/:id/export.pdf", middleware.RequireAuth(h.tokens), middleware.RequireRole(h.repo, models.RoleViewer), h.guestsPDF)
 }
 
 // guestsCSV streams all guests of the wedding as a UTF-8 CSV with a BOM so
@@ -84,4 +93,80 @@ func (h *Export) guestsCSV(c *gin.Context) {
 			g.CreatedAt.Format("2006-01-02 15:04:05"),
 		})
 	}
+	h.recordExport(c)
+}
+
+func (h *Export) guestsXLSX(c *gin.Context) {
+	guests, err := h.guests.List(c.Request.Context(), middleware.WeddingID(c), repository.GuestFilter{Limit: 10000})
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, response.CodeInternal, "export failed")
+		return
+	}
+
+	book := excelize.NewFile()
+	defer func() { _ = book.Close() }()
+	const sheet = "Guests"
+	headers := []string{"full_name", "contact", "relationship", "status", "companions", "table_label", "meal", "created_at"}
+	for col, header := range headers {
+		cell, _ := excelize.CoordinatesToCellName(col+1, 1)
+		_ = book.SetCellValue(sheet, cell, header)
+	}
+	for row, guest := range guests {
+		values := []any{guest.FullName, guest.Contact, guest.Relationship, string(guest.Status), guest.Companions, guest.TableLabel, guest.Meal, guest.CreatedAt.Format(time.RFC3339)}
+		for col, value := range values {
+			cell, _ := excelize.CoordinatesToCellName(col+1, row+2)
+			_ = book.SetCellValue(sheet, cell, value)
+		}
+	}
+	var out bytes.Buffer
+	if err := book.Write(&out); err != nil {
+		response.Error(c, http.StatusInternalServerError, response.CodeInternal, "export failed")
+		return
+	}
+	c.Data(http.StatusOK, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", out.Bytes())
+	c.Header("Content-Disposition", `attachment; filename="guests.xlsx"`)
+	h.recordExport(c)
+}
+
+// guestsPDF creates a compact printable guest list. The backend keeps the
+// same columns as CSV/XLSX so exports remain interchangeable.
+func (h *Export) guestsPDF(c *gin.Context) {
+	guests, err := h.guests.List(c.Request.Context(), middleware.WeddingID(c), repository.GuestFilter{Limit: 10000})
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, response.CodeInternal, "export failed")
+		return
+	}
+	pdf := fpdf.New("P", "mm", "A4", "")
+	pdf.SetTitle("Zawaj guest list", false)
+	pdf.AddPage()
+	pdf.SetFont("Arial", "B", 14)
+	pdf.CellFormat(0, 10, "Zawaj guest list", "", 1, "L", false, 0, "")
+	pdf.SetFont("Arial", "", 8)
+	for _, guest := range guests {
+		line := fmt.Sprintf("%s | %s | %s | %s | %d | %s | %s", guest.FullName, guest.Contact, guest.Relationship, guest.Status, guest.Companions, guest.TableLabel, guest.Meal)
+		pdf.MultiCell(0, 5, line, "", "L", false)
+	}
+	var out bytes.Buffer
+	if err := pdf.Output(&out); err != nil {
+		response.Error(c, http.StatusInternalServerError, response.CodeInternal, "export failed")
+		return
+	}
+	c.Data(http.StatusOK, "application/pdf", out.Bytes())
+	c.Header("Content-Disposition", `attachment; filename="guests.pdf"`)
+	h.recordExport(c)
+}
+
+func (h *Export) recordExport(c *gin.Context) {
+	if h.activity == nil {
+		return
+	}
+	actor, ok := middleware.UserID(c)
+	if !ok {
+		return
+	}
+	h.activity.Record(c.Request.Context(), events.Activity{
+		WeddingID: middleware.WeddingID(c),
+		ActorID:   actor,
+		Action:    models.ActListExported,
+	})
 }

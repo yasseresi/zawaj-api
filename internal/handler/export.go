@@ -4,9 +4,9 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/csv"
-	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"zawaj/internal/auth"
@@ -135,25 +135,20 @@ func (h *Export) guestsXLSX(c *gin.Context) {
 	h.recordExport(c)
 }
 
-// guestsPDF creates a compact printable guest list. The backend keeps the
-// same columns as CSV/XLSX so exports remain interchangeable.
+// guestsPDF creates a printable, localized guest table.
 func (h *Export) guestsPDF(c *gin.Context) {
 	guests, err := h.guests.List(c.Request.Context(), middleware.WeddingID(c), repository.GuestFilter{Limit: 10000})
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, response.CodeInternal, "export failed")
 		return
 	}
+	language := exportLanguage(c)
 	pdf := fpdf.New("P", "mm", "A4", "")
 	pdf.AddUTF8FontFromBytes("dejavu", "", dejavuFont)
-	pdf.SetTitle("Zawaj guest list", false)
+	pdf.SetTitle(pdfString(language, "قائمة المدعوين", "Guest list", "Liste des invités"), false)
 	pdf.AddPage()
-	pdf.SetFont("dejavu", "", 14)
-	pdf.CellFormat(0, 10, "Zawaj guest list", "", 1, "L", false, 0, "")
-	pdf.SetFont("dejavu", "", 8)
-	for _, guest := range guests {
-		line := fmt.Sprintf("%s | %s | %s | %s | %d | %s | %s", guest.FullName, guest.Contact, guest.Relationship, guest.Status, guest.Companions, guest.TableLabel, guest.Meal)
-		pdf.MultiCell(0, 5, shapeArabic(line), "", "L", false)
-	}
+	drawPDFHeader(pdf, language)
+	drawPDFGuestTable(pdf, guests, language)
 	var out bytes.Buffer
 	if err := pdf.Output(&out); err != nil {
 		response.Error(c, http.StatusInternalServerError, response.CodeInternal, "export failed")
@@ -161,6 +156,151 @@ func (h *Export) guestsPDF(c *gin.Context) {
 	}
 	writeDownload(c, "application/pdf", `attachment; filename="guests.pdf"`, out.Bytes())
 	h.recordExport(c)
+}
+
+func exportLanguage(c *gin.Context) string {
+	language := c.Query("lang")
+	if language == "" {
+		language = strings.Split(c.GetHeader("Accept-Language"), ",")[0]
+	}
+	language = strings.ToLower(strings.TrimSpace(strings.Split(language, "-")[0]))
+	switch language {
+	case "ar", "fr":
+		return language
+	default:
+		return "en"
+	}
+}
+
+func pdfString(language, arabic, english, french string) string {
+	switch language {
+	case "ar":
+		return arabic
+	case "fr":
+		return french
+	default:
+		return english
+	}
+}
+
+func drawPDFHeader(pdf *fpdf.Fpdf, language string) {
+	pdf.SetFont("dejavu", "", 16)
+	pdf.SetTextColor(55, 40, 36)
+	title := pdfString(language, "قائمة المدعوين", "Guest list", "Liste des invités")
+	if language == "ar" {
+		title = shapeArabic(title)
+	}
+	pdf.CellFormat(0, 10, title, "", 1, "C", false, 0, "")
+	pdf.SetFont("dejavu", "", 9)
+	pdf.SetTextColor(100, 80, 74)
+	subtitle := pdfString(language, "الاسم وعدد الأشخاص وحالة الدعوة", "Name, guest count and RSVP status", "Nom, nombre d'invités et statut")
+	if language == "ar" {
+		subtitle = shapeArabic(subtitle)
+	}
+	pdf.CellFormat(0, 7, subtitle, "", 1, "C", false, 0, "")
+	pdf.Ln(7)
+}
+
+func drawPDFGuestTable(pdf *fpdf.Fpdf, guests []models.Guest, language string) {
+	margin := 14.0
+	pageWidth, _ := pdf.GetPageSize()
+	tableWidth := pageWidth - (margin * 2)
+	columnWidths := []float64{tableWidth * 0.60, tableWidth * 0.20, tableWidth * 0.20}
+	headers := []string{
+		pdfString(language, "الاسم", "Name", "Nom"),
+		pdfString(language, "عدد الأشخاص", "Guests", "Invités"),
+		pdfString(language, "الحالة", "Status", "Statut"),
+	}
+	if language == "ar" {
+		columnWidths = []float64{columnWidths[2], columnWidths[1], columnWidths[0]}
+		headers = []string{headers[2], headers[1], headers[0]}
+	}
+
+	drawPDFTableHeader(pdf, margin, columnWidths, headers, language)
+
+	for row, guest := range guests {
+		if pdf.GetY() > 270 {
+			pdf.AddPage()
+		}
+
+		fill := row%2 == 0
+		if fill {
+			pdf.SetFillColor(250, 242, 239)
+		} else {
+			pdf.SetFillColor(255, 255, 255)
+		}
+		pdf.SetTextColor(55, 40, 36)
+		pdf.SetFont("dejavu", "", 9)
+		name := guest.FullName
+		if language == "ar" {
+			name = shapeArabic(name)
+		}
+		name = truncatePDFText(pdf, name, columnWidths[0]-4)
+		count := strconv.Itoa(guestCount(guest))
+
+		status := ""
+		if guest.Status == models.StatusConfirmed {
+			status = "✓"
+			pdf.SetTextColor(40, 125, 65)
+		} else if guest.Status == models.StatusDeclined {
+			status = "✕"
+			pdf.SetTextColor(180, 55, 50)
+		}
+		if language == "ar" {
+			pdf.CellFormat(columnWidths[0], 10, status, "1", 0, "C", fill, 0, "")
+			pdf.SetTextColor(55, 40, 36)
+			pdf.CellFormat(columnWidths[1], 10, count, "1", 0, "C", fill, 0, "")
+			pdf.CellFormat(columnWidths[2], 10, name, "1", 0, "R", fill, 0, "")
+		} else {
+			pdf.SetTextColor(55, 40, 36)
+			pdf.CellFormat(columnWidths[0], 10, name, "1", 0, "L", fill, 0, "")
+			pdf.CellFormat(columnWidths[1], 10, count, "1", 0, "C", fill, 0, "")
+			if status != "" {
+				if guest.Status == models.StatusConfirmed {
+					pdf.SetTextColor(40, 125, 65)
+				} else {
+					pdf.SetTextColor(180, 55, 50)
+				}
+			}
+			pdf.CellFormat(columnWidths[2], 10, status, "1", 0, "C", fill, 0, "")
+		}
+		pdf.Ln(-1)
+	}
+}
+
+func drawPDFTableHeader(pdf *fpdf.Fpdf, margin float64, columns []float64, headers []string, language string) {
+	pdf.SetX(margin)
+	pdf.SetFont("dejavu", "", 10)
+	pdf.SetFillColor(157, 84, 67)
+	pdf.SetTextColor(255, 255, 255)
+	for i, header := range headers {
+		text := header
+		if language == "ar" {
+			text = shapeArabic(text)
+		}
+		pdf.CellFormat(columns[i], 11, text, "1", 0, "C", true, 0, "")
+	}
+	pdf.Ln(-1)
+}
+
+func truncatePDFText(pdf *fpdf.Fpdf, text string, width float64) string {
+	if pdf.GetStringWidth(text) <= width {
+		return text
+	}
+	const suffix = "..."
+	runes := []rune(text)
+	for len(runes) > 0 {
+		candidate := string(runes) + suffix
+		if pdf.GetStringWidth(candidate) <= width {
+			return candidate
+		}
+		runes = runes[:len(runes)-1]
+	}
+	return suffix
+}
+
+func guestCount(guest models.Guest) int {
+	return guest.Companions + 1
 }
 
 func writeDownload(c *gin.Context, contentType, disposition string, body []byte) {

@@ -12,6 +12,7 @@ import (
 	"zawaj/internal/dto"
 	"zawaj/internal/models"
 	"zawaj/internal/repository"
+	"zawaj/internal/validation"
 
 	"github.com/google/uuid"
 )
@@ -50,12 +51,19 @@ func (s *AuthService) issuePair(ctx context.Context, userID uuid.UUID) (auth.Tok
 
 // Register creates a new account and returns tokens plus the one-time recovery code.
 func (s *AuthService) Register(ctx context.Context, req dto.RegisterRequest) (*dto.AuthResponse, error) {
+	if err := validation.Username(req.Username); err != nil {
+		return nil, apperr.Validation(err.Error())
+	}
+	if err := validation.Password(req.Password); err != nil {
+		return nil, apperr.Validation(err.Error())
+	}
+	req.Username = validation.NormalizeUsername(req.Username)
 	exists, err := s.users.ExistsByUsername(ctx, req.Username)
 	if err != nil {
 		return nil, apperr.Internal("register failed")
 	}
 	if exists {
-		return nil, apperr.Conflict("username already taken")
+		return nil, apperr.UsernameTaken("username already taken")
 	}
 
 	passwordHash, err := auth.HashSecret(req.Password)
@@ -78,6 +86,9 @@ func (s *AuthService) Register(ctx context.Context, req dto.RegisterRequest) (*d
 		RecoveryHash: recoveryHash,
 	}
 	if err := s.users.Create(ctx, u); err != nil {
+		if repository.IsUniqueViolation(err) {
+			return nil, apperr.UsernameTaken("username already taken")
+		}
 		return nil, apperr.Internal("register failed")
 	}
 
@@ -92,6 +103,13 @@ func (s *AuthService) Register(ctx context.Context, req dto.RegisterRequest) (*d
 // Login authenticates with username + password. It enforces an account lockout
 // after too many failed attempts and equalizes timing for unknown usernames.
 func (s *AuthService) Login(ctx context.Context, req dto.LoginRequest) (*dto.AuthResponse, error) {
+	if err := validation.Username(req.Username); err != nil {
+		return nil, apperr.Validation(err.Error())
+	}
+	if req.Password == "" {
+		return nil, apperr.Validation("password is required")
+	}
+	req.Username = validation.NormalizeUsername(req.Username)
 	u, err := s.users.ByUsername(ctx, req.Username)
 	if errors.Is(err, repository.ErrNotFound) {
 		// Spend the same work as a real verify so response time doesn't reveal
@@ -203,6 +221,13 @@ func (s *AuthService) Logout(ctx context.Context, req dto.RefreshRequest) error 
 
 // Recover resets the PIN using the one-time recovery code and issues a fresh code.
 func (s *AuthService) Recover(ctx context.Context, req dto.RecoverRequest) (*dto.AuthResponse, error) {
+	if err := validation.Username(req.Username); err != nil {
+		return nil, apperr.Validation(err.Error())
+	}
+	if err := validation.Password(req.NewPassword); err != nil {
+		return nil, apperr.Validation(err.Error())
+	}
+	req.Username = validation.NormalizeUsername(req.Username)
 	u, err := s.users.ByUsername(ctx, req.Username)
 	if errors.Is(err, repository.ErrNotFound) {
 		auth.VerifySecret(dummyHash, req.RecoveryCode) // equalize timing
@@ -269,6 +294,12 @@ func (s *AuthService) Me(ctx context.Context, userID uuid.UUID) (*dto.UserRespon
 
 // ChangePassword verifies the current password and sets a new one.
 func (s *AuthService) ChangePassword(ctx context.Context, userID uuid.UUID, req dto.ChangePasswordRequest) error {
+	if req.OldPassword == "" {
+		return apperr.Validation("current password is required")
+	}
+	if err := validation.Password(req.NewPassword); err != nil {
+		return apperr.Validation(err.Error())
+	}
 	u, err := s.users.ByID(ctx, userID)
 	if err != nil {
 		return apperr.NotFound("user not found")

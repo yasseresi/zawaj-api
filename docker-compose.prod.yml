@@ -21,9 +21,16 @@ services:
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?set CORS_ALLOWED_ORIGINS}
       RATE_LIMIT_RPS: ${RATE_LIMIT_RPS:-20}
       RATE_LIMIT_BURST: ${RATE_LIMIT_BURST:-40}
-      # Optional FCM push (mount the service-account JSON as a secret and point here):
-      # GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/firebase-sa.json
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/firebase-service-account.json
     ports:
       - "8080:8080"
     # Run behind a TLS-terminating reverse proxy / load balancer; do not expose
     # this port publicly without HTTPS in front.
+    secrets:
+      - source: firebase_service_account
+        target: firebase-service-account.json
+        mode: 0444
+
+secrets:
+  firebase_service_account:
+    file: ./secrets/zawaj-3e9e1-firebase-adminsdk-fbsvc-db8b07248f.json

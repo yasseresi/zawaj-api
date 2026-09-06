@@ -35,7 +35,19 @@ func Unauthenticated(msg string) *Error {
 func Forbidden(msg string) *Error { return New(http.StatusForbidden, response.CodeForbidden, msg) }
 func NotFound(msg string) *Error  { return New(http.StatusNotFound, response.CodeNotFound, msg) }
 func Conflict(msg string) *Error  { return New(http.StatusConflict, response.CodeConflict, msg) }
-func Locked(msg string) *Error    { return New(http.StatusLocked, response.CodeLocked, msg) }
+func UsernameTaken(msg string) *Error {
+	return New(http.StatusConflict, response.CodeUsernameTaken, msg)
+}
+func InvitePending(msg string) *Error {
+	return New(http.StatusConflict, response.CodeInvitePending, msg)
+}
+func AlreadyMember(msg string) *Error {
+	return New(http.StatusConflict, response.CodeAlreadyMember, msg)
+}
+func SelfInvite(msg string) *Error {
+	return New(http.StatusBadRequest, response.CodeSelfInvite, msg)
+}
+func Locked(msg string) *Error { return New(http.StatusLocked, response.CodeLocked, msg) }
 func RateLimited(msg string) *Error {
 	return New(http.StatusTooManyRequests, response.CodeRateLimited, msg)
 }

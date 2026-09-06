@@ -29,8 +29,17 @@ services:
       DATABASE_URL: postgres://zawaj:zawaj@db:5432/zawaj?sslmode=disable
       JWT_ACCESS_SECRET: dev-access-secret-change-me
       JWT_REFRESH_SECRET: dev-refresh-secret-change-me
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/firebase-service-account.json
     ports:
       - "8080:8080"
+    secrets:
+      - source: firebase_service_account
+        target: firebase-service-account.json
+        mode: 0444
 
 volumes:
   pgdata:
+
+secrets:
+  firebase_service_account:
+    file: ./secrets/zawaj-3e9e1-firebase-adminsdk-fbsvc-db8b07248f.json

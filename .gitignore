@@ -13,6 +13,9 @@ secrets/
 *serviceAccount*.json
 *.pem
 *.key
+*.p8
+*.p12
+*.mobileprovision
 
 # Test / coverage
 *.out

@@ -8,6 +8,7 @@ import (
 	"zawaj/internal/events"
 	"zawaj/internal/models"
 	"zawaj/internal/repository"
+	"zawaj/internal/validation"
 
 	"github.com/google/uuid"
 )
@@ -31,6 +32,10 @@ func NewInviteService(invites *repository.InviteRepo, weddings *repository.Weddi
 // Invite creates a pending invite for [username] to join [weddingID] with [role]
 // (editor|viewer). Caller must be the wedding owner (enforced by middleware).
 func (s *InviteService) Invite(ctx context.Context, weddingID, inviterID uuid.UUID, username string, role models.Role) (*models.WeddingInvite, error) {
+	if err := validation.Username(username); err != nil {
+		return nil, apperr.Validation(err.Error())
+	}
+	username = validation.NormalizeUsername(username)
 	if role != models.RoleEditor && role != models.RoleViewer {
 		return nil, apperr.Validation("role must be editor or viewer")
 	}
@@ -42,18 +47,18 @@ func (s *InviteService) Invite(ctx context.Context, weddingID, inviterID uuid.UU
 		return nil, apperr.Internal("user lookup failed")
 	}
 	if invitee.ID == inviterID {
-		return nil, apperr.Validation("you cannot invite yourself")
+		return nil, apperr.SelfInvite("you cannot invite yourself")
 	}
 	// Already a member? Nothing to invite.
 	if existing, gerr := s.weddings.GetRole(ctx, weddingID, invitee.ID); gerr == nil && existing != "" {
-		return nil, apperr.Conflict("user is already a collaborator")
+		return nil, apperr.AlreadyMember("user is already a collaborator")
 	}
 	pending, err := s.invites.HasPending(ctx, weddingID, invitee.ID)
 	if err != nil {
 		return nil, apperr.Internal("invite check failed")
 	}
 	if pending {
-		return nil, apperr.Conflict("an invite is already pending for this user")
+		return nil, apperr.InvitePending("an invite is already pending for this user")
 	}
 	inv := &models.WeddingInvite{
 		WeddingID: weddingID,
@@ -63,6 +68,9 @@ func (s *InviteService) Invite(ctx context.Context, weddingID, inviterID uuid.UU
 		Status:    models.InvitePending,
 	}
 	if err := s.invites.Create(ctx, inv); err != nil {
+		if repository.IsUniqueViolation(err) {
+			return nil, apperr.InvitePending("an invite is already pending for this user")
+		}
 		return nil, apperr.Internal("create invite failed")
 	}
 	// Notify the invitee (not yet a member, so the member fan-out would miss

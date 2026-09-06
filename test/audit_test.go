@@ -46,7 +46,7 @@ func TestAudit_RecordsSecurityEvents(t *testing.T) {
 
 	// Login generates a login_success audit event.
 	if code, _ := do(t, e, "POST", "/api/v1/auth/login", "", map[string]any{
-		"username": "audit_owner", "password": "password123",
+		"username": "audit_owner", "password": "Password123!",
 	}); code != 200 {
 		t.Fatalf("login: want 200, got %d", code)
 	}

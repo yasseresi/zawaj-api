@@ -14,6 +14,10 @@ const (
 	CodeLocked          = "locked"
 	CodeRateLimited     = "rate_limited"
 	CodeInternal        = "internal"
+	CodeUsernameTaken   = "username_taken"
+	CodeInvitePending   = "invite_pending"
+	CodeAlreadyMember   = "already_member"
+	CodeSelfInvite      = "self_invite"
 )
 
 // Envelope is the single response shape for the whole API.

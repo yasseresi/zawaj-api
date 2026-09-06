@@ -10,7 +10,7 @@ func TestAuthFlow(t *testing.T) {
 
 	// Register
 	code, body := do(t, e, http.MethodPost, "/api/v1/auth/register", "", map[string]any{
-		"username": "ahmed", "display_name": "Ahmed", "password": "correcthorse",
+		"username": "ahmed", "display_name": "Ahmed", "password": "CorrectHorse1!",
 	})
 	if code != http.StatusCreated {
 		t.Fatalf("register: want 201, got %d (%v)", code, body)
@@ -34,9 +34,14 @@ func TestAuthFlow(t *testing.T) {
 
 	// Duplicate username -> 409
 	if code, _ := do(t, e, http.MethodPost, "/api/v1/auth/register", "", map[string]any{
-		"username": "ahmed", "display_name": "X", "password": "anotherpass",
+		"username": "ahmed", "display_name": "X", "password": "AnotherPass1!",
 	}); code != http.StatusConflict {
 		t.Fatalf("dup register: want 409, got %d", code)
+	}
+	if code, _ := do(t, e, http.MethodPost, "/api/v1/auth/register", "", map[string]any{
+		"username": "AHMED", "display_name": "X", "password": "AnotherPass1!",
+	}); code != http.StatusConflict {
+		t.Fatalf("case-insensitive dup register: want 409, got %d", code)
 	}
 
 	// Too-short password -> 400
@@ -44,6 +49,11 @@ func TestAuthFlow(t *testing.T) {
 		"username": "zed", "display_name": "Z", "password": "short",
 	}); code != http.StatusBadRequest {
 		t.Fatalf("short password: want 400, got %d", code)
+	}
+	if code, _ := do(t, e, http.MethodPost, "/api/v1/auth/register", "", map[string]any{
+		"username": "weak", "display_name": "Weak", "password": "Password1",
+	}); code != http.StatusBadRequest {
+		t.Fatalf("weak password: want 400, got %d", code)
 	}
 
 	// Wrong password -> 401
@@ -62,12 +72,12 @@ func TestAuthFlow(t *testing.T) {
 
 	// Recover -> 200, then login with new password
 	if code, _ := do(t, e, http.MethodPost, "/api/v1/auth/recover", "", map[string]any{
-		"username": "ahmed", "recovery_code": recovery, "new_password": "brandnewpass",
+		"username": "ahmed", "recovery_code": recovery, "new_password": "BrandNewPass1!",
 	}); code != http.StatusOK {
 		t.Fatalf("recover: want 200, got %d", code)
 	}
 	if code, _ := do(t, e, http.MethodPost, "/api/v1/auth/login", "", map[string]any{
-		"username": "ahmed", "password": "brandnewpass",
+		"username": "ahmed", "password": "BrandNewPass1!",
 	}); code != http.StatusOK {
 		t.Fatalf("login new password: want 200, got %d", code)
 	}

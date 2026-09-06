@@ -130,7 +130,7 @@ func do(t *testing.T, e *gin.Engine, method, path, token string, body any) (int,
 func register(t *testing.T, e *gin.Engine, username string) (access, userID string) {
 	t.Helper()
 	code, body := do(t, e, "POST", "/api/v1/auth/register", "", map[string]any{
-		"username": username, "display_name": username, "password": "password123",
+		"username": username, "display_name": username, "password": "Password123!",
 	})
 	if code != 201 {
 		t.Fatalf("register %s: want 201, got %d (%v)", username, code, body)

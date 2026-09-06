@@ -1,0 +1,10 @@
+.git
+.env
+secrets/
+*.pem
+*.key
+*firebase*.json
+*serviceAccount*.json
+graphify-out/
+bin/
+coverage.*

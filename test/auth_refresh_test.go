@@ -8,7 +8,7 @@ import (
 func TestRefreshRotationAndReuseDetection(t *testing.T) {
 	e := newApp(t)
 	code, body := do(t, e, "POST", "/api/v1/auth/register", "", map[string]any{
-		"username": "rot_user", "display_name": "Rot", "password": "password123",
+		"username": "rot_user", "display_name": "Rot", "password": "Password123!",
 	})
 	if code != http.StatusCreated {
 		t.Fatalf("register: want 201, got %d (%v)", code, body)
@@ -42,7 +42,7 @@ func TestRefreshRotationAndReuseDetection(t *testing.T) {
 func TestLogoutRevokesRefresh(t *testing.T) {
 	e := newApp(t)
 	code, body := do(t, e, "POST", "/api/v1/auth/register", "", map[string]any{
-		"username": "logout_user", "display_name": "Lo", "password": "password123",
+		"username": "logout_user", "display_name": "Lo", "password": "Password123!",
 	})
 	if code != http.StatusCreated {
 		t.Fatalf("register: want 201, got %d", code)
@@ -60,7 +60,7 @@ func TestLogoutRevokesRefresh(t *testing.T) {
 func TestChangePasswordRevokesSessions(t *testing.T) {
 	e := newApp(t)
 	code, body := do(t, e, "POST", "/api/v1/auth/register", "", map[string]any{
-		"username": "cp_user", "display_name": "Cp", "password": "password123",
+		"username": "cp_user", "display_name": "Cp", "password": "Password123!",
 	})
 	if code != http.StatusCreated {
 		t.Fatalf("register: want 201, got %d", code)
@@ -69,7 +69,7 @@ func TestChangePasswordRevokesSessions(t *testing.T) {
 	r1, _ := dataOf(body)["refresh"].(string)
 
 	if code, _ := do(t, e, "PATCH", "/api/v1/me/password", access, map[string]any{
-		"old_password": "password123", "new_password": "newpassword123",
+		"old_password": "Password123!", "new_password": "NewPassword123!",
 	}); code != http.StatusOK {
 		t.Fatalf("change password: want 200, got %d", code)
 	}

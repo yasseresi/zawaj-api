@@ -20,6 +20,10 @@ import (
 // originating request so a slow FCM call never delays the API response.
 const pushTimeout = 10 * time.Second
 
+// noteGuestStatusChanged is the RSVP-change notification type; its push is
+// gated on the recipient's notif_rsvp preference (the in-app row is kept).
+const noteGuestStatusChanged = "guest_status_changed"
+
 // NotificationService fans out and reads personal notifications. It implements
 // events.Notifier so producer services (guests, members) can emit notifications
 // without importing this package.
@@ -99,7 +103,7 @@ func (s *NotificationService) NotifyUser(ctx context.Context, userID uuid.UUID, 
 }
 
 // pushToDevices delivers a fan-out as FCM push to recipients who have push
-// enabled. It runs detached from the request (its own timeout) and prunes tokens
+// enabled (and, for RSVP changes, RSVP alerts enabled). It runs detached from the request (its own timeout) and prunes tokens
 // FCM reports as invalid. Best-effort: failures are logged, never surfaced.
 func (s *NotificationService) pushToDevices(recipients []uuid.UUID, n events.Note) {
 	if s.pusher == nil || s.devices == nil || len(recipients) == 0 {
@@ -109,7 +113,7 @@ func (s *NotificationService) pushToDevices(recipients []uuid.UUID, n events.Not
 		ctx, cancel := context.WithTimeout(context.Background(), pushTimeout)
 		defer cancel()
 
-		tokens, err := s.devices.TokensForUsers(ctx, recipients, true)
+		tokens, err := s.devices.TokensForUsers(ctx, recipients, true, n.Type == noteGuestStatusChanged)
 		if err != nil {
 			s.log.Error("notify: load device tokens failed", "error", err, "type", n.Type)
 			return

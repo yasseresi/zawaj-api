@@ -52,8 +52,10 @@ func (r *DeviceTokenRepo) Delete(ctx context.Context, userID uuid.UUID, token st
 }
 
 // TokensForUsers returns the FCM tokens of the given users. When pushEnabledOnly
-// is set, users who have disabled push (users.notif_push = false) are excluded.
-func (r *DeviceTokenRepo) TokensForUsers(ctx context.Context, userIDs []uuid.UUID, pushEnabledOnly bool) ([]string, error) {
+// is set, users who have disabled push (users.notif_push = false) are excluded;
+// when rsvpEnabledOnly is set, users who turned off RSVP-change alerts
+// (users.notif_rsvp = false) are excluded too.
+func (r *DeviceTokenRepo) TokensForUsers(ctx context.Context, userIDs []uuid.UUID, pushEnabledOnly, rsvpEnabledOnly bool) ([]string, error) {
 	if len(userIDs) == 0 {
 		return nil, nil
 	}
@@ -61,8 +63,14 @@ func (r *DeviceTokenRepo) TokensForUsers(ctx context.Context, userIDs []uuid.UUI
 		Table("device_tokens dt").
 		Select("dt.token").
 		Where("dt.user_id IN ?", userIDs)
+	if pushEnabledOnly || rsvpEnabledOnly {
+		q = q.Joins("JOIN users u ON u.id = dt.user_id")
+	}
 	if pushEnabledOnly {
-		q = q.Joins("JOIN users u ON u.id = dt.user_id").Where("u.notif_push = ?", true)
+		q = q.Where("u.notif_push = ?", true)
+	}
+	if rsvpEnabledOnly {
+		q = q.Where("u.notif_rsvp = ?", true)
 	}
 	var tokens []string
 	err := q.Scan(&tokens).Error

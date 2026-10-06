@@ -29,6 +29,13 @@ import (
 // the test when TEST_DATABASE_URL is not set.
 func newApp(t *testing.T) *gin.Engine {
 	t.Helper()
+	return newAppWithPusher(t, nil)
+}
+
+// newAppWithPusher is newApp with a custom push sender (nil = no-op), for
+// tests that assert on what gets pushed.
+func newAppWithPusher(t *testing.T, pusher push.Sender) *gin.Engine {
+	t.Helper()
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("TEST_DATABASE_URL not set; skipping integration test")
@@ -54,7 +61,10 @@ func newApp(t *testing.T) *gin.Engine {
 	deviceRepo := repository.NewDeviceTokenRepo(db)
 	auditSvc := service.NewAuditService(repository.NewAuditRepo(db), log)
 	activitySvc := service.NewActivityService(repository.NewActivityRepo(db), log)
-	notifSvc := service.NewNotificationService(notifRepo, weddingRepo, deviceRepo, push.NewNoop(log), log)
+	if pusher == nil {
+		pusher = push.NewNoop(log)
+	}
+	notifSvc := service.NewNotificationService(notifRepo, weddingRepo, deviceRepo, pusher, log)
 	guestSvc := service.NewGuestService(guestRepo, activitySvc, notifSvc)
 
 	return router.New(db, log, true, []string{"*"}, 0, 0, tokens, repository.NewIdempotencyRepo(db), // rate limiting disabled in tests

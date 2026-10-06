@@ -105,6 +105,10 @@ Register with **username (unique) + password (min 8)**. Server bcrypt-hashes the
 generates a random **recovery code** returned **once** in plaintext (bcrypt hash stored).
 Recovery code is the *only* account-reset path. Rate-limit + lockout on login/recover.
 
+**Amendment (2026-10-06):** users may add an optional, **unverified** Algerian phone number
+(national format, e.g. `0672859965`) as a profile contact field. It is never an auth or
+recovery factor, so this decision is unchanged. The legacy `email` column is no longer exposed.
+
 ### Options
 | Option | Friction | Security | Reset path |
 |---|---|---|---|

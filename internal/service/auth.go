@@ -321,7 +321,7 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID uuid.UUID, req 
 }
 
 // UpdateSettings applies preference changes and returns the updated user.
-func (s *AuthService) UpdateSettings(ctx context.Context, userID uuid.UUID, req dto.UpdateSettingsRequest) (*models.User, error) {
+func (s *AuthService) UpdateSettings(ctx context.Context, userID uuid.UUID, req dto.UpdateSettingsRequest) (*dto.UserResponse, error) {
 	u, err := s.users.ByID(ctx, userID)
 	if err != nil {
 		return nil, apperr.NotFound("user not found")
@@ -344,7 +344,8 @@ func (s *AuthService) UpdateSettings(ctx context.Context, userID uuid.UUID, req 
 	if err := s.users.Update(ctx, u); err != nil {
 		return nil, apperr.Internal("update settings failed")
 	}
-	return u, nil
+	resp := dto.NewUserResponse(u)
+	return &resp, nil
 }
 
 // UpdateMe edits the current user's profile.
@@ -355,6 +356,17 @@ func (s *AuthService) UpdateMe(ctx context.Context, userID uuid.UUID, req dto.Up
 	}
 	if req.DisplayName != nil {
 		u.DisplayName = *req.DisplayName
+	}
+	if req.Phone != nil {
+		if *req.Phone == "" {
+			u.Phone = nil
+		} else {
+			phone, err := validation.NormalizePhone(*req.Phone)
+			if err != nil {
+				return nil, apperr.Validation(err.Error())
+			}
+			u.Phone = &phone
+		}
 	}
 	if err := s.users.Update(ctx, u); err != nil {
 		return nil, apperr.Internal("update failed")

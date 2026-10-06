@@ -237,6 +237,9 @@ definitions:
       display_name:
         maxLength: 80
         type: string
+      phone:
+        maxLength: 20
+        type: string
     type: object
   zawaj_internal_dto.UpdateSettingsRequest:
     properties:
@@ -265,9 +268,17 @@ definitions:
     type: object
   zawaj_internal_dto.UserResponse:
     properties:
+      dark_mode:
+        type: boolean
       display_name:
         type: string
       id:
+        type: string
+      notif_push:
+        type: boolean
+      notif_rsvp:
+        type: boolean
+      phone:
         type: string
       username:
         type: string
@@ -1020,7 +1031,7 @@ paths:
             - $ref: '#/definitions/zawaj_pkg_response.Envelope'
             - properties:
                 data:
-                  type: object
+                  $ref: '#/definitions/zawaj_internal_dto.UserResponse'
               type: object
         "400":
           description: Bad Request

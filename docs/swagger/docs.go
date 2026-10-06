@@ -1321,7 +1321,7 @@ const docTemplate = `{
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "type": "object"
+                                            "$ref": "#/definitions/zawaj_internal_dto.UserResponse"
                                         }
                                     }
                                 }
@@ -3842,6 +3842,10 @@ const docTemplate = `{
                 "display_name": {
                     "type": "string",
                     "maxLength": 80
+                },
+                "phone": {
+                    "type": "string",
+                    "maxLength": 20
                 }
             }
         },
@@ -3885,10 +3889,22 @@ const docTemplate = `{
         "zawaj_internal_dto.UserResponse": {
             "type": "object",
             "properties": {
+                "dark_mode": {
+                    "type": "boolean"
+                },
                 "display_name": {
                     "type": "string"
                 },
                 "id": {
+                    "type": "string"
+                },
+                "notif_push": {
+                    "type": "boolean"
+                },
+                "notif_rsvp": {
+                    "type": "boolean"
+                },
+                "phone": {
                     "type": "string"
                 },
                 "username": {

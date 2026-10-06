@@ -269,7 +269,7 @@ func (h *Auth) deleteMe(c *gin.Context) {
 // @Produce  json
 // @Security BearerAuth
 // @Param    body body dto.UpdateSettingsRequest true "Settings"
-// @Success  200 {object} response.Envelope{data=object}
+// @Success  200 {object} response.Envelope{data=dto.UserResponse}
 // @Failure  400 {object} response.Envelope{error=response.APIError}
 // @Failure  401 {object} response.Envelope{error=response.APIError}
 // @Router   /me/settings [patch]

@@ -13,8 +13,19 @@ func TestDeleteAccount(t *testing.T) {
 	do(t, e, http.MethodPost, "/api/v1/weddings/"+wid+"/guests", sarah, map[string]any{"full_name": "A"})
 	joinAs(t, e, sarah, wid, "editor", omar) // omar collaborates
 
+	// Deletion requires the current password.
+	if code, _ := do(t, e, http.MethodDelete, "/api/v1/me", sarah, nil); code != http.StatusBadRequest {
+		t.Fatalf("delete without password: want 400, got %d", code)
+	}
+	if code, _ := do(t, e, http.MethodDelete, "/api/v1/me", sarah, map[string]any{"password": "wrongpassword"}); code != http.StatusUnauthorized {
+		t.Fatalf("delete with wrong password: want 401, got %d", code)
+	}
+	if code, _ := do(t, e, http.MethodGet, "/api/v1/weddings/"+wid, omar, nil); code != http.StatusOK {
+		t.Fatalf("wedding must survive a rejected delete: want 200, got %d", code)
+	}
+
 	// Sarah deletes her account.
-	if code, _ := do(t, e, http.MethodDelete, "/api/v1/me", sarah, nil); code != http.StatusOK {
+	if code, _ := do(t, e, http.MethodDelete, "/api/v1/me", sarah, map[string]any{"password": "Password123!"}); code != http.StatusOK {
 		t.Fatalf("delete account: want 200, got %d", code)
 	}
 	// Her login no longer works.
@@ -115,5 +126,33 @@ func TestProfilePhone(t *testing.T) {
 	_, body = do(t, e, http.MethodPatch, "/api/v1/me", tok, map[string]any{"phone": ""})
 	if _, ok := dataOf(body)["phone"]; ok {
 		t.Fatalf("clear phone: want no phone key, got %v", body)
+	}
+}
+
+// Wrong passwords on DELETE /me share the login lockout counter, so the
+// endpoint cannot be used to brute-force a password.
+func TestDeleteAccountLockout(t *testing.T) {
+	e := newApp(t)
+	tok, _ := register(t, e, "sarah")
+	locked := false
+	for i := 0; i < 20 && !locked; i++ {
+		code, _ := do(t, e, http.MethodDelete, "/api/v1/me", tok, map[string]any{"password": "wrongpassword"})
+		switch code {
+		case http.StatusUnauthorized:
+		case http.StatusLocked:
+			locked = true
+		default:
+			t.Fatalf("attempt %d: want 401 or 423, got %d", i, code)
+		}
+	}
+	if !locked {
+		t.Fatal("repeated wrong passwords never locked the account")
+	}
+	// Even the correct password is refused while locked, and the account survives.
+	if code, _ := do(t, e, http.MethodDelete, "/api/v1/me", tok, map[string]any{"password": "Password123!"}); code != http.StatusLocked {
+		t.Fatalf("delete while locked: want 423, got %d", code)
+	}
+	if code, _ := do(t, e, http.MethodGet, "/api/v1/me", tok, nil); code != http.StatusOK {
+		t.Fatalf("account must survive: want 200, got %d", code)
 	}
 }

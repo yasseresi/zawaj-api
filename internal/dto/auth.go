@@ -43,6 +43,11 @@ type ChangePasswordRequest struct {
 	NewPassword string `json:"new_password" binding:"required,min=8,max=72"`
 }
 
+// DeleteAccountRequest confirms account deletion with the current password.
+type DeleteAccountRequest struct {
+	Password string `json:"password" binding:"required"`
+}
+
 // UpdateSettingsRequest edits preferences (settings screen). All fields optional.
 type UpdateSettingsRequest struct {
 	Email      *string `json:"email" binding:"omitempty,email,max=120"`

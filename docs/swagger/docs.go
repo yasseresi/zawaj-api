@@ -873,7 +873,10 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Permanently deletes the account and cascades all owned weddings and their data.",
+                "description": "Permanently deletes the account and cascades all owned weddings and their data.\nRequires the current password. Wrong passwords count toward the login lockout.",
+                "consumes": [
+                    "application/json"
+                ],
                 "produces": [
                     "application/json"
                 ],
@@ -881,6 +884,17 @@ const docTemplate = `{
                     "me"
                 ],
                 "summary": "Delete account",
+                "parameters": [
+                    {
+                        "description": "Current password",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/zawaj_internal_dto.DeleteAccountRequest"
+                        }
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "{ deleted: true }",
@@ -900,8 +914,44 @@ const docTemplate = `{
                             ]
                         }
                     },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/zawaj_pkg_response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/zawaj_pkg_response.APIError"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
                     "401": {
-                        "description": "Unauthorized",
+                        "description": "missing token or wrong password",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/zawaj_pkg_response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/zawaj_pkg_response.APIError"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "423": {
+                        "description": "locked after too many failed attempts",
                         "schema": {
                             "allOf": [
                                 {
@@ -3628,6 +3678,17 @@ const docTemplate = `{
                 "name": {
                     "type": "string",
                     "maxLength": 120
+                }
+            }
+        },
+        "zawaj_internal_dto.DeleteAccountRequest": {
+            "type": "object",
+            "required": [
+                "password"
+            ],
+            "properties": {
+                "password": {
+                    "type": "string"
                 }
             }
         },

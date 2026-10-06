@@ -88,6 +88,13 @@ definitions:
     required:
     - name
     type: object
+  zawaj_internal_dto.DeleteAccountRequest:
+    properties:
+      password:
+        type: string
+    required:
+    - password
+    type: object
   zawaj_internal_dto.InviteUserRequest:
     properties:
       role:
@@ -738,8 +745,18 @@ paths:
       - invites
   /me:
     delete:
-      description: Permanently deletes the account and cascades all owned weddings
-        and their data.
+      consumes:
+      - application/json
+      description: |-
+        Permanently deletes the account and cascades all owned weddings and their data.
+        Requires the current password. Wrong passwords count toward the login lockout.
+      parameters:
+      - description: Current password
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/zawaj_internal_dto.DeleteAccountRequest'
       produces:
       - application/json
       responses:
@@ -752,8 +769,26 @@ paths:
                 data:
                   type: object
               type: object
+        "400":
+          description: Bad Request
+          schema:
+            allOf:
+            - $ref: '#/definitions/zawaj_pkg_response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/zawaj_pkg_response.APIError'
+              type: object
         "401":
-          description: Unauthorized
+          description: missing token or wrong password
+          schema:
+            allOf:
+            - $ref: '#/definitions/zawaj_pkg_response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/zawaj_pkg_response.APIError'
+              type: object
+        "423":
+          description: locked after too many failed attempts
           schema:
             allOf:
             - $ref: '#/definitions/zawaj_pkg_response.Envelope'

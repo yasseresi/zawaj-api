@@ -273,9 +273,24 @@ func (s *AuthService) Recover(ctx context.Context, req dto.RecoverRequest) (*dto
 	return &dto.AuthResponse{Access: pair.Access, Refresh: pair.Refresh, RecoveryCode: newCode}, nil
 }
 
-// DeleteAccount hard-deletes the current user and cascade-deletes the weddings
-// they own.
-func (s *AuthService) DeleteAccount(ctx context.Context, userID uuid.UUID) error {
+// DeleteAccount permanently deletes the user and every wedding they own, after
+// re-verifying the current password. Wrong passwords count toward the login
+// lockout so this endpoint can't be used to brute-force the password.
+func (s *AuthService) DeleteAccount(ctx context.Context, userID uuid.UUID, password string) error {
+	if password == "" {
+		return apperr.Validation("password is required")
+	}
+	u, err := s.users.ByID(ctx, userID)
+	if err != nil {
+		return apperr.NotFound("user not found")
+	}
+	if u.LockedUntil != nil && u.LockedUntil.After(time.Now()) {
+		return apperr.Locked("account temporarily locked due to failed attempts")
+	}
+	if !auth.VerifySecret(u.PasswordHash, password) {
+		s.registerFailure(ctx, u)
+		return apperr.Unauthenticated("password is incorrect")
+	}
 	if err := s.users.DeleteWithOwnedData(ctx, userID); err != nil {
 		return apperr.Internal("delete account failed")
 	}

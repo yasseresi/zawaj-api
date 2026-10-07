@@ -5,6 +5,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
 
 	"zawaj/internal/models"
 
@@ -62,9 +63,12 @@ func (r *UserRepo) ExistsByUsername(ctx context.Context, username string) (bool,
 
 // Update persists changes to an existing user, or returns ErrNotFound if the
 // row is gone. Unlike Save it never falls back to INSERT, so a write racing an
-// account deletion can't resurrect the user.
+// account deletion can't resurrect the user. Lockout state (failed_attempts,
+// locked_until) is never written here — a stale copy would undo a lock that
+// landed after it was loaded; use RecordFailure / ClearFailures instead.
 func (r *UserRepo) Update(ctx context.Context, u *models.User) error {
-	res := r.db.WithContext(ctx).Model(u).Select("*").Omit("id", "created_at").Updates(u)
+	res := r.db.WithContext(ctx).Model(u).Select("*").
+		Omit("id", "created_at", "failed_attempts", "locked_until").Updates(u)
 	if res.Error != nil {
 		return res.Error
 	}
@@ -72,6 +76,23 @@ func (r *UserRepo) Update(ctx context.Context, u *models.User) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+// RecordFailure atomically counts one failed credential check. The attempt
+// that reaches maxAttempts locks the account until lockedUntil and resets the
+// counter. A single UPDATE (row-locked by Postgres) means parallel guesses
+// can't lose increments.
+func (r *UserRepo) RecordFailure(ctx context.Context, userID uuid.UUID, maxAttempts int, lockedUntil time.Time) error {
+	return r.db.WithContext(ctx).Exec(`UPDATE users SET
+		locked_until    = CASE WHEN failed_attempts + 1 >= ? THEN ? ELSE locked_until END,
+		failed_attempts = CASE WHEN failed_attempts + 1 >= ? THEN 0 ELSE failed_attempts + 1 END
+		WHERE id = ?`, maxAttempts, lockedUntil, maxAttempts, userID).Error
+}
+
+// ClearFailures resets the failed-attempt counter and lifts any lock.
+func (r *UserRepo) ClearFailures(ctx context.Context, userID uuid.UUID) error {
+	return r.db.WithContext(ctx).Exec(
+		"UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE id = ?", userID).Error
 }
 
 // DeleteWithOwnedData hard-deletes a user and cascade-deletes every wedding they

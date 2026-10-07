@@ -141,9 +141,7 @@ func (s *AuthService) Login(ctx context.Context, req dto.LoginRequest) (*dto.Aut
 
 	// Success: clear any failure state.
 	if u.FailedAttempts != 0 || u.LockedUntil != nil {
-		u.FailedAttempts = 0
-		u.LockedUntil = nil
-		_ = s.users.Update(ctx, u)
+		_ = s.users.ClearFailures(ctx, u.ID)
 	}
 
 	pair, err := s.issuePair(ctx, u.ID)
@@ -154,19 +152,13 @@ func (s *AuthService) Login(ctx context.Context, req dto.LoginRequest) (*dto.Aut
 	return &dto.AuthResponse{User: &resp, Access: pair.Access, Refresh: pair.Refresh}, nil
 }
 
-// registerFailure increments the failed-attempt counter and locks the account
-// once it reaches maxAttempts.
+// registerFailure counts a failed credential check (atomically, in the
+// database) and locks the account once it reaches maxAttempts.
 func (s *AuthService) registerFailure(ctx context.Context, u *models.User) {
 	if s.maxAttempts <= 0 {
 		return
 	}
-	u.FailedAttempts++
-	if u.FailedAttempts >= s.maxAttempts {
-		until := time.Now().Add(s.lockout)
-		u.LockedUntil = &until
-		u.FailedAttempts = 0
-	}
-	_ = s.users.Update(ctx, u)
+	_ = s.users.RecordFailure(ctx, u.ID, s.maxAttempts, time.Now().Add(s.lockout))
 }
 
 // Refresh rotates a valid refresh token: it verifies the token, checks the
@@ -267,11 +259,10 @@ func (s *AuthService) Recover(ctx context.Context, req dto.RecoverRequest) (*dto
 	}
 	u.PasswordHash = passwordHash
 	u.RecoveryHash = newCodeHash
-	u.FailedAttempts = 0
-	u.LockedUntil = nil
 	if err := s.users.Update(ctx, u); err != nil {
 		return nil, userWriteErr(err, "recover failed")
 	}
+	_ = s.users.ClearFailures(ctx, u.ID)
 	// Password was reset — invalidate any existing sessions.
 	_ = s.refresh.RevokeAllForUser(ctx, u.ID)
 

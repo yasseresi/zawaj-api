@@ -1252,6 +1252,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Requires the current password. Wrong passwords count toward the login lockout.",
                 "consumes": [
                     "application/json"
                 ],
@@ -1311,7 +1312,25 @@ const docTemplate = `{
                         }
                     },
                     "401": {
-                        "description": "Unauthorized",
+                        "description": "missing token or wrong current password",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/zawaj_pkg_response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/zawaj_pkg_response.APIError"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "423": {
+                        "description": "account locked after too many failed attempts",
                         "schema": {
                             "allOf": [
                                 {

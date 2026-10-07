@@ -218,6 +218,7 @@ func (h *Auth) updateMe(c *gin.Context) {
 
 // changePassword godoc
 // @Summary  Change password
+// @Description Requires the current password. Wrong passwords count toward the login lockout.
 // @Tags     me
 // @Accept   json
 // @Produce  json
@@ -225,7 +226,8 @@ func (h *Auth) updateMe(c *gin.Context) {
 // @Param    body body dto.ChangePasswordRequest true "Old and new password"
 // @Success  200 {object} response.Envelope{data=object} "{ changed: true }"
 // @Failure  400 {object} response.Envelope{error=response.APIError}
-// @Failure  401 {object} response.Envelope{error=response.APIError}
+// @Failure  401 {object} response.Envelope{error=response.APIError} "missing token or wrong current password"
+// @Failure  423 {object} response.Envelope{error=response.APIError} "account locked after too many failed attempts"
 // @Router   /me/password [patch]
 func (h *Auth) changePassword(c *gin.Context) {
 	userID, _ := middleware.UserID(c)

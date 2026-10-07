@@ -307,7 +307,9 @@ func (s *AuthService) Me(ctx context.Context, userID uuid.UUID) (*dto.UserRespon
 	return &resp, nil
 }
 
-// ChangePassword verifies the current password and sets a new one.
+// ChangePassword verifies the current password and sets a new one. Wrong
+// current passwords count toward the login lockout, so a stolen access token
+// can't be used to brute-force the password.
 func (s *AuthService) ChangePassword(ctx context.Context, userID uuid.UUID, req dto.ChangePasswordRequest) error {
 	if req.OldPassword == "" {
 		return apperr.Validation("current password is required")
@@ -319,7 +321,11 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID uuid.UUID, req 
 	if err != nil {
 		return apperr.NotFound("user not found")
 	}
+	if u.LockedUntil != nil && u.LockedUntil.After(time.Now()) {
+		return apperr.Locked("account temporarily locked due to failed attempts")
+	}
 	if !auth.VerifySecret(u.PasswordHash, req.OldPassword) {
+		s.registerFailure(ctx, u)
 		return apperr.Unauthenticated("current password is incorrect")
 	}
 	hash, err := auth.HashSecret(req.NewPassword)

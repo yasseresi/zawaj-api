@@ -66,3 +66,30 @@ func TestSecurityHeaders(t *testing.T) {
 		t.Fatalf("X-Frame-Options: want DENY, got %q", got)
 	}
 }
+
+// A stolen access token must not turn PATCH /me/password into an unlimited
+// password oracle: wrong current passwords share the login lockout.
+func TestChangePasswordLockout(t *testing.T) {
+	e := newApp(t)
+	tok, _ := register(t, e, "sarah") // Password123!, harness maxAttempts=5
+
+	for i := 0; i < 5; i++ {
+		if code, _ := do(t, e, http.MethodPatch, "/api/v1/me/password", tok, map[string]any{
+			"old_password": "wrongpassword", "new_password": "NewPassword1!",
+		}); code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d: want 401, got %d", i+1, code)
+		}
+	}
+	// Locked: even the correct current password is refused...
+	if code, _ := do(t, e, http.MethodPatch, "/api/v1/me/password", tok, map[string]any{
+		"old_password": "Password123!", "new_password": "NewPassword1!",
+	}); code != http.StatusLocked {
+		t.Fatalf("change after lockout: want 423, got %d", code)
+	}
+	// ...and so is login.
+	if code, _ := do(t, e, http.MethodPost, "/api/v1/auth/login", "", map[string]any{
+		"username": "sarah", "password": "Password123!",
+	}); code != http.StatusLocked {
+		t.Fatalf("login after change-password lockout: want 423, got %d", code)
+	}
+}

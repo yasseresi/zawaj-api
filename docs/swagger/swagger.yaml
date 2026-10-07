@@ -1003,6 +1003,8 @@ paths:
     patch:
       consumes:
       - application/json
+      description: Requires the current password. Wrong passwords count toward the
+        login lockout.
       parameters:
       - description: Old and new password
         in: body
@@ -1032,7 +1034,16 @@ paths:
                   $ref: '#/definitions/zawaj_pkg_response.APIError'
               type: object
         "401":
-          description: Unauthorized
+          description: missing token or wrong current password
+          schema:
+            allOf:
+            - $ref: '#/definitions/zawaj_pkg_response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/zawaj_pkg_response.APIError'
+              type: object
+        "423":
+          description: account locked after too many failed attempts
           schema:
             allOf:
             - $ref: '#/definitions/zawaj_pkg_response.Envelope'

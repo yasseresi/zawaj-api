@@ -192,3 +192,33 @@ func TestInviteLinkCannotUndoDemotion(t *testing.T) {
 		t.Fatalf("my_role after re-accept: want viewer, got %v", dataOf(wb)["my_role"])
 	}
 }
+
+// The app's mitigation for demote → leave → rejoin: after a demotion the
+// owner revokes the editor links, and a revoked link can't re-admit anyone.
+func TestRevokedEditorLinkBlocksRejoinAfterDemotion(t *testing.T) {
+	e := newApp(t)
+	sarah, _ := register(t, e, "sarah")
+	omar, omarID := register(t, e, "omar")
+	wid := createWedding(t, e, sarah, "L&O")
+
+	_, lb := do(t, e, "POST", "/api/v1/weddings/"+wid+"/invite-links", sarah, map[string]any{"role": "editor"})
+	link := dataOf(lb)
+	tok, _ := link["token"].(string)
+	linkID, _ := link["id"].(string)
+	do(t, e, "POST", "/api/v1/invite/"+tok+"/accept", omar, nil)
+	do(t, e, "PATCH", "/api/v1/weddings/"+wid+"/members/"+omarID, sarah, map[string]any{"role": "viewer"})
+	if code, _ := do(t, e, "DELETE", "/api/v1/weddings/"+wid+"/invite-links/"+linkID, sarah, nil); code != 200 {
+		t.Fatalf("revoke: want 200, got %d", code)
+	}
+
+	// omar leaves, then tries the old editor link.
+	if code, _ := do(t, e, "DELETE", "/api/v1/weddings/"+wid+"/members/"+omarID, omar, nil); code != 200 {
+		t.Fatalf("leave: want 200, got %d", code)
+	}
+	if code, _ := do(t, e, "POST", "/api/v1/invite/"+tok+"/accept", omar, nil); code != 404 {
+		t.Fatalf("rejoin via revoked link: want 404, got %d", code)
+	}
+	if code, _ := do(t, e, "GET", "/api/v1/weddings/"+wid, omar, nil); code != 404 {
+		t.Fatalf("omar after failed rejoin: want 404 (not a member), got %d", code)
+	}
+}

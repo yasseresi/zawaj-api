@@ -36,6 +36,14 @@ func newApp(t *testing.T) *gin.Engine {
 // tests that assert on what gets pushed.
 func newAppWithPusher(t *testing.T, pusher push.Sender) *gin.Engine {
 	t.Helper()
+	e, _ := newAppWithDB(t, pusher)
+	return e
+}
+
+// newAppWithDB is newAppWithPusher that also returns the database handle, for
+// tests that exercise repositories directly or inspect stored rows.
+func newAppWithDB(t *testing.T, pusher push.Sender) (*gin.Engine, *gorm.DB) {
+	t.Helper()
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("TEST_DATABASE_URL not set; skipping integration test")
@@ -67,7 +75,7 @@ func newAppWithPusher(t *testing.T, pusher push.Sender) *gin.Engine {
 	notifSvc := service.NewNotificationService(notifRepo, weddingRepo, deviceRepo, pusher, log)
 	guestSvc := service.NewGuestService(guestRepo, activitySvc, notifSvc)
 
-	return router.New(db, log, true, []string{"*"}, 0, 0, tokens, repository.NewIdempotencyRepo(db), // rate limiting disabled in tests
+	e := router.New(db, log, true, []string{"*"}, 0, 0, tokens, repository.NewIdempotencyRepo(db), // rate limiting disabled in tests
 		handler.NewAuth(service.NewAuthService(userRepo, repository.NewRefreshTokenRepo(db), tokens, 5, time.Minute), auditSvc, tokens),
 		handler.NewWedding(service.NewWeddingService(weddingRepo), auditSvc, weddingRepo, tokens),
 		handler.NewGuest(guestSvc, activitySvc, weddingRepo, tokens),
@@ -80,6 +88,7 @@ func newAppWithPusher(t *testing.T, pusher push.Sender) *gin.Engine {
 			service.NewInviteService(repository.NewInviteRepo(db), weddingRepo, userRepo, activitySvc, notifSvc),
 			weddingRepo, tokens),
 	)
+	return e, db
 }
 
 // cleanDB truncates all tables so each test starts from empty.

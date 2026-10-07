@@ -36,6 +36,15 @@ func NewAuthService(users *repository.UserRepo, refresh *repository.RefreshToken
 	return &AuthService{users: users, refresh: refresh, tokens: tokens, maxAttempts: maxAttempts, lockout: lockout}
 }
 
+// userWriteErr maps a failed user write: the user vanished (deleted
+// concurrently) is a 404, anything else a 500 with msg.
+func userWriteErr(err error, msg string) *apperr.Error {
+	if errors.Is(err, repository.ErrNotFound) {
+		return apperr.NotFound("user not found")
+	}
+	return apperr.Internal(msg)
+}
+
 // issuePair issues an access+refresh pair and records the refresh token's jti so
 // it can be rotated/revoked later.
 func (s *AuthService) issuePair(ctx context.Context, userID uuid.UUID) (auth.TokenPair, error) {
@@ -261,7 +270,7 @@ func (s *AuthService) Recover(ctx context.Context, req dto.RecoverRequest) (*dto
 	u.FailedAttempts = 0
 	u.LockedUntil = nil
 	if err := s.users.Update(ctx, u); err != nil {
-		return nil, apperr.Internal("recover failed")
+		return nil, userWriteErr(err, "recover failed")
 	}
 	// Password was reset — invalidate any existing sessions.
 	_ = s.refresh.RevokeAllForUser(ctx, u.ID)
@@ -328,7 +337,7 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID uuid.UUID, req 
 	}
 	u.PasswordHash = hash
 	if err := s.users.Update(ctx, u); err != nil {
-		return apperr.Internal("change password failed")
+		return userWriteErr(err, "change password failed")
 	}
 	// Invalidate existing sessions after a password change.
 	_ = s.refresh.RevokeAllForUser(ctx, userID)
@@ -357,7 +366,7 @@ func (s *AuthService) UpdateSettings(ctx context.Context, userID uuid.UUID, req 
 		u.NotifRSVP = *req.NotifRSVP
 	}
 	if err := s.users.Update(ctx, u); err != nil {
-		return nil, apperr.Internal("update settings failed")
+		return nil, userWriteErr(err, "update settings failed")
 	}
 	resp := dto.NewUserResponse(u)
 	return &resp, nil
@@ -384,7 +393,7 @@ func (s *AuthService) UpdateMe(ctx context.Context, userID uuid.UUID, req dto.Up
 		}
 	}
 	if err := s.users.Update(ctx, u); err != nil {
-		return nil, apperr.Internal("update failed")
+		return nil, userWriteErr(err, "update failed")
 	}
 	resp := dto.NewUserResponse(u)
 	return &resp, nil

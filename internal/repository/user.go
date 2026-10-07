@@ -60,9 +60,18 @@ func (r *UserRepo) ExistsByUsername(ctx context.Context, username string) (bool,
 	return count > 0, err
 }
 
-// Update persists changes to an existing user.
+// Update persists changes to an existing user, or returns ErrNotFound if the
+// row is gone. Unlike Save it never falls back to INSERT, so a write racing an
+// account deletion can't resurrect the user.
 func (r *UserRepo) Update(ctx context.Context, u *models.User) error {
-	return r.db.WithContext(ctx).Save(u).Error
+	res := r.db.WithContext(ctx).Model(u).Select("*").Omit("id", "created_at").Updates(u)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // DeleteWithOwnedData hard-deletes a user and cascade-deletes every wedding they

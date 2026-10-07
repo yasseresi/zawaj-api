@@ -183,9 +183,13 @@ func TestInviteLinkCannotUndoDemotion(t *testing.T) {
 		t.Fatalf("demote: want 200, got %d", code)
 	}
 
-	_, ab := do(t, e, "POST", "/api/v1/invite/"+tok+"/accept", omar, nil)
-	if dataOf(ab)["role"] != "viewer" {
-		t.Fatalf("re-accept after demotion: want viewer, got %v", dataOf(ab)["role"])
+	// Demotion revokes the editor link he joined with (404), and even a live
+	// link never changes an existing membership.
+	if code, _ := do(t, e, "POST", "/api/v1/invite/"+tok+"/accept", omar, nil); code != 404 {
+		t.Fatalf("re-accept revoked link after demotion: want 404, got %d", code)
+	}
+	if _, ab := do(t, e, "POST", "/api/v1/invite/"+editorLink(t, e, sarah, wid)+"/accept", omar, nil); dataOf(ab)["role"] != "viewer" {
+		t.Fatalf("accept fresh editor link as a viewer member: want viewer kept, got %v", dataOf(ab)["role"])
 	}
 	_, wb := do(t, e, "GET", "/api/v1/weddings/"+wid, omar, nil)
 	if dataOf(wb)["my_role"] != "viewer" {

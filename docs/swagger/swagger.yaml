@@ -2106,6 +2106,7 @@ paths:
       description: |-
         Owner can remove anyone; any member can remove themselves (leave).
         An owner removal is remembered: invite links can no longer re-admit that user (only a new username invite can).
+        It also revokes the invite link they joined with, and withdraws their pending username invites.
       parameters:
       - description: Wedding ID
         in: path
@@ -2155,6 +2156,8 @@ paths:
     patch:
       consumes:
       - application/json
+      description: Demoting an editor to viewer also revokes the editor invite link
+        they joined with (if any).
       parameters:
       - description: Wedding ID
         in: path

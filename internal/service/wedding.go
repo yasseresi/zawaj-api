@@ -184,7 +184,7 @@ func (s *WeddingService) AcceptInvite(ctx context.Context, tok string, userID uu
 	if err != nil {
 		return nil, err
 	}
-	if err := s.weddings.UpsertMembership(ctx, l.WeddingID, userID, role); err != nil {
+	if err := s.weddings.UpsertMembership(ctx, l.WeddingID, userID, role, &l.ID); err != nil {
 		return nil, apperr.Internal("join failed")
 	}
 	w, err := s.weddings.ByID(ctx, l.WeddingID)

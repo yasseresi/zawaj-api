@@ -186,6 +186,7 @@ func (h *Wedding) members(c *gin.Context) {
 
 // setRole godoc
 // @Summary  Change a member's role (owner only)
+// @Description Demoting an editor to viewer also revokes the editor invite link they joined with (if any).
 // @Tags     members
 // @Accept   json
 // @Produce  json
@@ -224,6 +225,7 @@ func (h *Wedding) setRole(c *gin.Context) {
 // @Summary  Remove a member or leave
 // @Description Owner can remove anyone; any member can remove themselves (leave).
 // @Description An owner removal is remembered: invite links can no longer re-admit that user (only a new username invite can).
+// @Description It also revokes the invite link they joined with, and withdraws their pending username invites.
 // @Tags     members
 // @Produce  json
 // @Security BearerAuth

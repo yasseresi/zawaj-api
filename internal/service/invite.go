@@ -127,7 +127,7 @@ func (s *InviteService) Accept(ctx context.Context, inviteID, userID uuid.UUID) 
 	// Never downgrade an existing higher role.
 	final := role
 	if existing, gerr := s.weddings.GetRole(ctx, inv.WeddingID, userID); gerr != nil || existing.Rank() < role.Rank() {
-		if uerr := s.weddings.UpsertMembership(ctx, inv.WeddingID, userID, role); uerr != nil {
+		if uerr := s.weddings.UpsertMembership(ctx, inv.WeddingID, userID, role, nil); uerr != nil {
 			return nil, apperr.Internal("join failed")
 		}
 	} else {

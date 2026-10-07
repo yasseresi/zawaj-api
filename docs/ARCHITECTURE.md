@@ -164,7 +164,10 @@ membership**, never from the request body. All repository queries are scoped by 
   write the new role, owner removals write `none`. Link accepts grant
   `min(link role, ceiling)` and refuse `none` (403 `removed_from_wedding`). Only an owner
   username invite created after the decision supersedes it (its outcome is recorded as the new decision). Self-leave
-  never writes a ceiling. Tests: `test/ceiling_test.go`.
+  never writes a ceiling. Ceilings follow the user id, so to stop a second account
+  reusing the same link, memberships record `via_link_id` (migration 000011): an owner
+  removal revokes that link, and a demotion below its role revokes it too. An owner
+  removal also withdraws the user's pending username invites. Tests: `test/ceiling_test.go`.
 
 ---
 

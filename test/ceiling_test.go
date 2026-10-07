@@ -57,7 +57,12 @@ func TestDemotedMemberRejoinsCappedAtOwnerRole(t *testing.T) {
 	do(t, e, http.MethodPatch, "/api/v1/weddings/"+wid+"/members/"+omarID, sarah, map[string]any{"role": "viewer"})
 	leave(t, e, wid, omarID, omar) // self-leave keeps the owner's decision
 
-	code, ab := acceptLink(t, e, tok, omar)
+	// The link he joined with was revoked by the demotion; a fresh editor link
+	// is capped at the owner's decision.
+	if code, _ := acceptLink(t, e, tok, omar); code != http.StatusNotFound {
+		t.Fatalf("joined-with link after demotion: want 404 (revoked), got %d", code)
+	}
+	code, ab := acceptLink(t, e, editorLink(t, e, sarah, wid), omar)
 	if code != http.StatusOK || dataOf(ab)["role"] != "viewer" {
 		t.Fatalf("rejoin via editor link after demotion: want 200 viewer, got %d %v", code, dataOf(ab)["role"])
 	}
@@ -76,13 +81,14 @@ func TestRemovedMemberCannotRejoinByLink(t *testing.T) {
 	acceptLink(t, e, tok, omar)
 	leave(t, e, wid, omarID, sarah) // owner removes omar
 
-	code, body := acceptLink(t, e, tok, omar)
-	if code != http.StatusForbidden || errCode(body) != "removed_from_wedding" {
-		t.Fatalf("rejoin after removal: want 403 removed_from_wedding, got %d %v", code, errCode(body))
+	// The link he joined with was revoked by the removal...
+	if code, _ := acceptLink(t, e, tok, omar); code != http.StatusNotFound {
+		t.Fatalf("joined-with link after removal: want 404 (revoked), got %d", code)
 	}
-	// A brand-new link doesn't help either.
-	if code, _ := acceptLink(t, e, editorLink(t, e, sarah, wid), omar); code != http.StatusForbidden {
-		t.Fatalf("rejoin via new link: want 403, got %d", code)
+	// ...and any other link is refused for him.
+	code, body := acceptLink(t, e, editorLink(t, e, sarah, wid), omar)
+	if code != http.StatusForbidden || errCode(body) != "removed_from_wedding" {
+		t.Fatalf("rejoin via another link: want 403 removed_from_wedding, got %d %v", code, errCode(body))
 	}
 	if r := myRole(t, e, wid, omar); r != nil {
 		t.Fatalf("removed member still has access: %v", r)
@@ -108,7 +114,7 @@ func TestOwnerInviteReadmitsRemovedMember(t *testing.T) {
 	// The re-invite is the owner's new decision ("viewer"), not a reset: after
 	// leaving, the editor link still only gives viewer.
 	leave(t, e, wid, omarID, omar)
-	if code, ab := acceptLink(t, e, tok, omar); code != http.StatusOK || dataOf(ab)["role"] != "viewer" {
+	if code, ab := acceptLink(t, e, editorLink(t, e, sarah, wid), omar); code != http.StatusOK || dataOf(ab)["role"] != "viewer" {
 		t.Fatalf("editor link after viewer re-invite: want 200 viewer, got %d %v", code, dataOf(ab)["role"])
 	}
 }
@@ -133,7 +139,7 @@ func TestOwnerInviteAfterDemotionLiftsCap(t *testing.T) {
 		t.Fatalf("my_role after editor re-invite: want editor, got %v", r)
 	}
 	leave(t, e, wid, omarID, omar)
-	if code, ab := acceptLink(t, e, tok, omar); code != http.StatusOK || dataOf(ab)["role"] != "editor" {
+	if code, ab := acceptLink(t, e, editorLink(t, e, sarah, wid), omar); code != http.StatusOK || dataOf(ab)["role"] != "editor" {
 		t.Fatalf("editor link after editor re-invite: want 200 editor, got %d %v", code, dataOf(ab)["role"])
 	}
 }
@@ -151,8 +157,13 @@ func TestPromotionLiftsCeiling(t *testing.T) {
 		}
 	}
 	leave(t, e, wid, omarID, omar)
-	if code, ab := acceptLink(t, e, tok, omar); code != http.StatusOK || dataOf(ab)["role"] != "editor" {
-		t.Fatalf("editor link after promotion: want 200 editor, got %d %v", code, dataOf(ab)["role"])
+	// The demotion revoked the link he joined with; a fresh editor link is no
+	// longer capped.
+	if code, _ := acceptLink(t, e, tok, omar); code != http.StatusNotFound {
+		t.Fatalf("link revoked by the demotion: want 404, got %d", code)
+	}
+	if code, ab := acceptLink(t, e, editorLink(t, e, sarah, wid), omar); code != http.StatusOK || dataOf(ab)["role"] != "editor" {
+		t.Fatalf("fresh editor link after promotion: want 200 editor, got %d %v", code, dataOf(ab)["role"])
 	}
 }
 
@@ -240,5 +251,101 @@ func TestCeilingsGoWithTheirWeddingAndUser(t *testing.T) {
 	}
 	if n := count(); n != 0 {
 		t.Fatalf("after account delete: want 0 ceilings, got %d", n)
+	}
+}
+
+// Ceilings follow the user id, so a removed or demoted member could rejoin
+// through the same link with a second account. The link they joined with is
+// therefore revoked when the owner removes them, or demotes them below the
+// role it grants. Other links keep working.
+
+func activeLinkIDs(t *testing.T, e *gin.Engine, ownerTok, wid string) map[string]bool {
+	t.Helper()
+	_, lb := do(t, e, http.MethodGet, "/api/v1/weddings/"+wid+"/invite-links", ownerTok, nil)
+	ids := map[string]bool{}
+	items, _ := lb["data"].([]any)
+	if items == nil {
+		items, _ = dataOf(lb)["items"].([]any)
+	}
+	for _, it := range items {
+		if m, ok := it.(map[string]any); ok {
+			id, _ := m["id"].(string)
+			ids[id] = true
+		}
+	}
+	return ids
+}
+
+func newLink(t *testing.T, e *gin.Engine, ownerTok, wid, role string) (id, tok string) {
+	t.Helper()
+	_, lb := do(t, e, http.MethodPost, "/api/v1/weddings/"+wid+"/invite-links", ownerTok, map[string]any{"role": role})
+	id, _ = dataOf(lb)["id"].(string)
+	tok, _ = dataOf(lb)["token"].(string)
+	return id, tok
+}
+
+func TestRemovalRevokesTheLinkTheyJoinedWith(t *testing.T) {
+	e := newApp(t)
+	sarah, _ := register(t, e, "sarah")
+	omar, omarID := register(t, e, "omar")
+	omar2, _ := register(t, e, "omar2") // omar's second account
+	wid := createWedding(t, e, sarah, "L&O")
+	usedID, usedTok := newLink(t, e, sarah, wid, "editor")
+	otherID, _ := newLink(t, e, sarah, wid, "editor")
+
+	acceptLink(t, e, usedTok, omar)
+	leave(t, e, wid, omarID, sarah)
+
+	if code, _ := acceptLink(t, e, usedTok, omar2); code != http.StatusNotFound {
+		t.Fatalf("second account via the removed member's link: want 404, got %d", code)
+	}
+	links := activeLinkIDs(t, e, sarah, wid)
+	if links[usedID] || !links[otherID] {
+		t.Fatalf("want only the used link revoked; active=%v used=%s other=%s", links, usedID, otherID)
+	}
+}
+
+func TestDemotionRevokesTheEditorLinkTheyJoinedWith(t *testing.T) {
+	e := newApp(t)
+	sarah, _ := register(t, e, "sarah")
+	omar, omarID := register(t, e, "omar")
+	omar2, _ := register(t, e, "omar2")
+	wid := createWedding(t, e, sarah, "L&O")
+	usedID, usedTok := newLink(t, e, sarah, wid, "editor")
+
+	acceptLink(t, e, usedTok, omar)
+	if code, _ := do(t, e, http.MethodPatch, "/api/v1/weddings/"+wid+"/members/"+omarID, sarah, map[string]any{"role": "viewer"}); code != http.StatusOK {
+		t.Fatalf("demote: want 200, got %d", code)
+	}
+	if code, _ := acceptLink(t, e, usedTok, omar2); code != http.StatusNotFound {
+		t.Fatalf("second account via editor link after demotion: want 404, got %d", code)
+	}
+	if activeLinkIDs(t, e, sarah, wid)[usedID] {
+		t.Fatalf("editor link still active after demoting the member who used it")
+	}
+}
+
+func TestLinksSurviveSelfLeaveAndNonDemotingChanges(t *testing.T) {
+	e := newApp(t)
+	sarah, _ := register(t, e, "sarah")
+	omar, omarID := register(t, e, "omar")
+	lina, linaID := register(t, e, "lina")
+	wid := createWedding(t, e, sarah, "L&O")
+	viewerID, viewerTok := newLink(t, e, sarah, wid, "viewer")
+	editorID, editorTok := newLink(t, e, sarah, wid, "editor")
+
+	// lina joined via the viewer link; promoting then demoting her back to
+	// viewer never goes below what that link grants.
+	acceptLink(t, e, viewerTok, lina)
+	for _, role := range []string{"editor", "viewer"} {
+		do(t, e, http.MethodPatch, "/api/v1/weddings/"+wid+"/members/"+linaID, sarah, map[string]any{"role": role})
+	}
+	// omar joined via the editor link and leaves on his own.
+	acceptLink(t, e, editorTok, omar)
+	leave(t, e, wid, omarID, omar)
+
+	links := activeLinkIDs(t, e, sarah, wid)
+	if !links[viewerID] || !links[editorID] {
+		t.Fatalf("links revoked without an owner removal/demotion below them: active=%v", links)
 	}
 }

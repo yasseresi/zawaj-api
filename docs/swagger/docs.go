@@ -3241,7 +3241,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Owner can remove anyone; any member can remove themselves (leave).\nAn owner removal is remembered: invite links can no longer re-admit that user (only a new username invite can).",
+                "description": "Owner can remove anyone; any member can remove themselves (leave).\nAn owner removal is remembered: invite links can no longer re-admit that user (only a new username invite can).\nIt also revokes the invite link they joined with, and withdraws their pending username invites.",
                 "produces": [
                     "application/json"
                 ],
@@ -3328,6 +3328,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Demoting an editor to viewer also revokes the editor invite link they joined with (if any).",
                 "consumes": [
                     "application/json"
                 ],

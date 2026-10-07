@@ -213,10 +213,10 @@ func (r *WeddingRepo) GetCeiling(ctx context.Context, weddingID, userID uuid.UUI
 	return &c, nil
 }
 
-// ClearCeiling drops the user's ceiling (the owner re-invited them).
-func (r *WeddingRepo) ClearCeiling(ctx context.Context, weddingID, userID uuid.UUID) error {
-	return r.db.WithContext(ctx).Exec(
-		"DELETE FROM membership_ceilings WHERE wedding_id = ? AND user_id = ?", weddingID, userID).Error
+// SetCeiling records an owner decision outside a role change or removal (an
+// owner username invite the user accepted).
+func (r *WeddingRepo) SetCeiling(ctx context.Context, weddingID, userID uuid.UUID, maxRole string) error {
+	return setCeiling(r.db.WithContext(ctx), weddingID, userID, maxRole)
 }
 
 func setCeiling(tx *gorm.DB, weddingID, userID uuid.UUID, maxRole string) error {

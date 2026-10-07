@@ -105,11 +105,54 @@ func TestOwnerInviteReadmitsRemovedMember(t *testing.T) {
 	if r := myRole(t, e, wid, omar); r != "viewer" {
 		t.Fatalf("my_role after re-invite: want viewer, got %v", r)
 	}
-	// The owner's new decision replaces the old one: after leaving, the editor
-	// link works again.
+	// The re-invite is the owner's new decision ("viewer"), not a reset: after
+	// leaving, the editor link still only gives viewer.
+	leave(t, e, wid, omarID, omar)
+	if code, ab := acceptLink(t, e, tok, omar); code != http.StatusOK || dataOf(ab)["role"] != "viewer" {
+		t.Fatalf("editor link after viewer re-invite: want 200 viewer, got %d %v", code, dataOf(ab)["role"])
+	}
+}
+
+func TestOwnerInviteAfterDemotionLiftsCap(t *testing.T) {
+	e := newApp(t)
+	sarah, _ := register(t, e, "sarah")
+	omar, omarID := register(t, e, "omar")
+	wid := createWedding(t, e, sarah, "L&O")
+	tok := editorLink(t, e, sarah, wid)
+	acceptLink(t, e, tok, omar)
+	if code, _ := do(t, e, http.MethodPatch, "/api/v1/weddings/"+wid+"/members/"+omarID, sarah, map[string]any{"role": "viewer"}); code != http.StatusOK {
+		t.Fatalf("demote: want 200, got %d", code)
+	}
+	leave(t, e, wid, omarID, omar)
+
+	inviteID := ownerInvite(t, e, sarah, wid, "omar", "editor")
+	if code, _ := do(t, e, http.MethodPost, "/api/v1/invites/"+inviteID+"/accept", omar, nil); code != http.StatusOK {
+		t.Fatalf("accept editor re-invite: want 200, got %d", code)
+	}
+	if r := myRole(t, e, wid, omar); r != "editor" {
+		t.Fatalf("my_role after editor re-invite: want editor, got %v", r)
+	}
 	leave(t, e, wid, omarID, omar)
 	if code, ab := acceptLink(t, e, tok, omar); code != http.StatusOK || dataOf(ab)["role"] != "editor" {
-		t.Fatalf("link after owner re-admission: want 200 editor, got %d %v", code, dataOf(ab)["role"])
+		t.Fatalf("editor link after editor re-invite: want 200 editor, got %d %v", code, dataOf(ab)["role"])
+	}
+}
+
+func TestPromotionLiftsCeiling(t *testing.T) {
+	e := newApp(t)
+	sarah, _ := register(t, e, "sarah")
+	omar, omarID := register(t, e, "omar")
+	wid := createWedding(t, e, sarah, "L&O")
+	tok := editorLink(t, e, sarah, wid)
+	acceptLink(t, e, tok, omar)
+	for _, role := range []string{"viewer", "editor"} {
+		if code, _ := do(t, e, http.MethodPatch, "/api/v1/weddings/"+wid+"/members/"+omarID, sarah, map[string]any{"role": role}); code != http.StatusOK {
+			t.Fatalf("set role %s: want 200, got %d", role, code)
+		}
+	}
+	leave(t, e, wid, omarID, omar)
+	if code, ab := acceptLink(t, e, tok, omar); code != http.StatusOK || dataOf(ab)["role"] != "editor" {
+		t.Fatalf("editor link after promotion: want 200 editor, got %d %v", code, dataOf(ab)["role"])
 	}
 }
 

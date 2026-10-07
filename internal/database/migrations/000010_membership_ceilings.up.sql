@@ -2,8 +2,8 @@
 -- is gone, so invite links can't override it:
 --   max_role 'editor' | 'viewer' : links grant at most this role
 --   max_role 'none'              : removed by the owner; links are refused
--- Written by owner role changes and removals; cleared when the owner
--- re-invites the user by username.
+-- Written by owner role changes, removals, and accepted owner username invites
+-- (whose outcome becomes the new decision).
 CREATE TABLE IF NOT EXISTS public.membership_ceilings (
     wedding_id uuid NOT NULL,
     user_id uuid NOT NULL,

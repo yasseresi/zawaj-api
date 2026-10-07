@@ -163,7 +163,7 @@ membership**, never from the request body. All repository queries are scoped by 
   (migration 000010) records the owner's last decision per (wedding, user): role changes
   write the new role, owner removals write `none`. Link accepts grant
   `min(link role, ceiling)` and refuse `none` (403 `removed_from_wedding`). Only an owner
-  username invite created after the decision supersedes it (and clears it). Self-leave
+  username invite created after the decision supersedes it (its outcome is recorded as the new decision). Self-leave
   never writes a ceiling. Tests: `test/ceiling_test.go`.
 
 ---

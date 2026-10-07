@@ -61,14 +61,17 @@ func (r *UserRepo) ExistsByUsername(ctx context.Context, username string) (bool,
 	return count > 0, err
 }
 
-// Update persists changes to an existing user, or returns ErrNotFound if the
-// row is gone. Unlike Save it never falls back to INSERT, so a write racing an
-// account deletion can't resurrect the user. Lockout state (failed_attempts,
-// locked_until) is never written here — a stale copy would undo a lock that
-// landed after it was loaded; use RecordFailure / ClearFailures instead.
-func (r *UserRepo) Update(ctx context.Context, u *models.User) error {
-	res := r.db.WithContext(ctx).Model(u).Select("*").
-		Omit("id", "created_at", "failed_attempts", "locked_until").Updates(u)
+// UpdateColumns writes only the given columns of an existing user, or returns
+// ErrNotFound if the row is gone. Callers name exactly the columns they
+// changed, so overlapping writes (two toggles, a profile edit during a
+// password change) can't revert each other, and an UPDATE never falls back to
+// INSERT, so a write racing an account deletion can't resurrect the user.
+// Lockout state has its own atomic writers (RecordFailure / ClearFailures).
+func (r *UserRepo) UpdateColumns(ctx context.Context, userID uuid.UUID, cols map[string]any) error {
+	if len(cols) == 0 {
+		return nil
+	}
+	res := r.db.WithContext(ctx).Model(&models.User{}).Where("id = ?", userID).Updates(cols)
 	if res.Error != nil {
 		return res.Error
 	}

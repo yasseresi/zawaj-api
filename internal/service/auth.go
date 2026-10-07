@@ -257,9 +257,9 @@ func (s *AuthService) Recover(ctx context.Context, req dto.RecoverRequest) (*dto
 	if err != nil {
 		return nil, apperr.Internal("recover failed")
 	}
-	u.PasswordHash = passwordHash
-	u.RecoveryHash = newCodeHash
-	if err := s.users.Update(ctx, u); err != nil {
+	if err := s.users.UpdateColumns(ctx, u.ID, map[string]any{
+		"password_hash": passwordHash, "recovery_hash": newCodeHash,
+	}); err != nil {
 		return nil, userWriteErr(err, "recover failed")
 	}
 	_ = s.users.ClearFailures(ctx, u.ID)
@@ -332,8 +332,7 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID uuid.UUID, req 
 	if err != nil {
 		return apperr.Internal("change password failed")
 	}
-	u.PasswordHash = hash
-	if err := s.users.Update(ctx, u); err != nil {
+	if err := s.users.UpdateColumns(ctx, userID, map[string]any{"password_hash": hash}); err != nil {
 		return userWriteErr(err, "change password failed")
 	}
 	// Invalidate existing sessions after a password change.
@@ -342,55 +341,57 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID uuid.UUID, req 
 }
 
 // UpdateSettings applies preference changes and returns the updated user.
+// Only the provided fields are written.
 func (s *AuthService) UpdateSettings(ctx context.Context, userID uuid.UUID, req dto.UpdateSettingsRequest) (*dto.UserResponse, error) {
-	u, err := s.users.ByID(ctx, userID)
-	if err != nil {
-		return nil, apperr.NotFound("user not found")
-	}
+	cols := map[string]any{}
 	if req.Email != nil {
-		u.Email = req.Email
+		cols["email"] = *req.Email
 	}
 	if req.DarkMode != nil {
-		u.DarkMode = *req.DarkMode
+		cols["dark_mode"] = *req.DarkMode
 	}
 	if req.NotifPush != nil {
-		u.NotifPush = *req.NotifPush
+		cols["notif_push"] = *req.NotifPush
 	}
 	if req.NotifEmail != nil {
-		u.NotifEmail = *req.NotifEmail
+		cols["notif_email"] = *req.NotifEmail
 	}
 	if req.NotifRSVP != nil {
-		u.NotifRSVP = *req.NotifRSVP
+		cols["notif_rsvp"] = *req.NotifRSVP
 	}
-	if err := s.users.Update(ctx, u); err != nil {
-		return nil, userWriteErr(err, "update settings failed")
-	}
-	resp := dto.NewUserResponse(u)
-	return &resp, nil
+	return s.writeAndReload(ctx, userID, cols, "update settings failed")
 }
 
-// UpdateMe edits the current user's profile.
+// UpdateMe edits the current user's profile. Only the provided fields are
+// written.
 func (s *AuthService) UpdateMe(ctx context.Context, userID uuid.UUID, req dto.UpdateMeRequest) (*dto.UserResponse, error) {
-	u, err := s.users.ByID(ctx, userID)
-	if err != nil {
-		return nil, apperr.NotFound("user not found")
-	}
+	cols := map[string]any{}
 	if req.DisplayName != nil {
-		u.DisplayName = *req.DisplayName
+		cols["display_name"] = *req.DisplayName
 	}
 	if req.Phone != nil {
 		if *req.Phone == "" {
-			u.Phone = nil
+			cols["phone"] = nil
 		} else {
 			phone, err := validation.NormalizePhone(*req.Phone)
 			if err != nil {
 				return nil, apperr.Validation(err.Error())
 			}
-			u.Phone = &phone
+			cols["phone"] = phone
 		}
 	}
-	if err := s.users.Update(ctx, u); err != nil {
-		return nil, userWriteErr(err, "update failed")
+	return s.writeAndReload(ctx, userID, cols, "update failed")
+}
+
+// writeAndReload writes cols and returns the user as stored afterwards, so the
+// response also reflects writes made concurrently by other requests.
+func (s *AuthService) writeAndReload(ctx context.Context, userID uuid.UUID, cols map[string]any, msg string) (*dto.UserResponse, error) {
+	if err := s.users.UpdateColumns(ctx, userID, cols); err != nil {
+		return nil, userWriteErr(err, msg)
+	}
+	u, err := s.users.ByID(ctx, userID)
+	if err != nil {
+		return nil, apperr.NotFound("user not found")
 	}
 	resp := dto.NewUserResponse(u)
 	return &resp, nil

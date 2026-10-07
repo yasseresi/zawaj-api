@@ -157,17 +157,24 @@ membership**, never from the request body. All repository queries are scoped by 
 - Harder: must remember to attach the middleware to every wedding route — mitigated by
   grouping all wedding routes under one Gin router group that carries the guard.
 - **Action:** integration tests assert 404 for non-member and 403 for viewer-writes on every route.
-- **Addendum (2026-10-07) — owner decisions outlive the membership.** Invite links are
-  long-lived and shared, so a demoted member could leave and rejoin through the editor
-  link, and a removed member through any active link. `membership_ceilings`
-  (migration 000010) records the owner's last decision per (wedding, user): role changes
-  write the new role, owner removals write `none`. Link accepts grant
-  `min(link role, ceiling)` and refuse `none` (403 `removed_from_wedding`). Only an owner
-  username invite created after the decision supersedes it (its outcome is recorded as the new decision). Self-leave
-  never writes a ceiling. Ceilings follow the user id, so to stop a second account
-  reusing the same link, memberships record `via_link_id` (migration 000011): an owner
-  removal revokes that link, and a demotion below its role revokes it too. An owner
-  removal also withdraws the user's pending username invites. Tests: `test/ceiling_test.go`.
+- **Addendum (2026-10-07/08) — joining by link needs the owner's approval.** Invite
+  links are long-lived bearer tokens shared in group chats, and accounts are free, so no
+  amount of link revocation can keep out someone who holds a live link (they re-register),
+  and revoking a shared link to stop one person breaks it for everyone.
+  - **Join requests** (migration 000012): accepting a link never creates a membership. It
+    creates a pending `join_requests` row (one per wedding+user, partial unique index) and
+    notifies the owner; the owner approves (optionally at a lower role) or declines.
+    Approval locks the row, creates the membership (`via_link_id`, migration 000011, kept
+    for history) and records the ceiling in one transaction. A declined user can't ask
+    again for 24h (409 `join_request_declined`). Links are never revoked on a member's
+    behalf. Username invites (owner picked the exact account) still join directly.
+  - **Ceilings** (migration 000010) record the owner's last decision per (wedding, user),
+    surviving the membership: role changes and approvals write the role, owner removals
+    write `none`, and an accepted owner username invite newer than the decision writes
+    its outcome. A join request asks for `min(link role, ceiling)`; `none` is refused up
+    front (403 `removed_from_wedding`). Self-leave writes nothing. An owner removal also
+    withdraws the user's pending username invites.
+  - Tests: `test/join_request_test.go`, `test/ceiling_test.go`.
 
 ---
 

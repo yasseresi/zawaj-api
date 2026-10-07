@@ -14,6 +14,7 @@ func Migrate(db *gorm.DB) error {
 		&models.Wedding{},
 		&models.Membership{},
 		&models.MembershipCeiling{},
+		&models.JoinRequest{},
 		&models.InviteLink{},
 		&models.WeddingInvite{},
 		&models.Guest{},

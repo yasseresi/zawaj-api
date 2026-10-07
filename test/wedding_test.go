@@ -60,13 +60,12 @@ func TestWeddingAndRoles(t *testing.T) {
 		t.Fatal("invite-link: empty token")
 	}
 
-	// Omar previews then accepts -> becomes editor.
+	// Omar previews, requests to join, and the owner approves -> editor.
 	if code, _ := do(t, e, http.MethodGet, "/api/v1/invite/"+tok, omar, nil); code != http.StatusOK {
 		t.Fatalf("preview: want 200, got %d", code)
 	}
-	_, ab := do(t, e, http.MethodPost, "/api/v1/invite/"+tok+"/accept", omar, nil)
-	if dataOf(ab)["role"] != "editor" {
-		t.Fatalf("accept: want role editor, got %v", dataOf(ab)["role"])
+	if role := joinViaLink(t, e, sarah, wid, tok, omar); role != "editor" {
+		t.Fatalf("join: want role editor, got %v", role)
 	}
 
 	// Role enforcement matrix.
@@ -166,63 +165,24 @@ func TestDeviceRegistration(t *testing.T) {
 	}
 }
 
-// Owner role decisions stick: a demoted member can't re-open the editor link
-// they joined with to get editor back. Links only ever create memberships.
+// Owner role decisions stick: re-opening the editor link they joined with
+// never changes a demoted member's role. Links only ever lead to a request for
+// non-members; an existing member keeps their role.
 func TestInviteLinkCannotUndoDemotion(t *testing.T) {
 	e := newApp(t)
 	sarah, _ := register(t, e, "sarah")
 	omar, omarID := register(t, e, "omar")
 	wid := createWedding(t, e, sarah, "L&O")
+	tok := editorLink(t, e, sarah, wid)
 
-	_, lb := do(t, e, "POST", "/api/v1/weddings/"+wid+"/invite-links", sarah, map[string]any{"role": "editor"})
-	tok, _ := dataOf(lb)["token"].(string)
-	if code, _ := do(t, e, "POST", "/api/v1/invite/"+tok+"/accept", omar, nil); code != 200 {
-		t.Fatalf("join: want 200, got %d", code)
-	}
-	if code, _ := do(t, e, "PATCH", "/api/v1/weddings/"+wid+"/members/"+omarID, sarah, map[string]any{"role": "viewer"}); code != 200 {
-		t.Fatalf("demote: want 200, got %d", code)
-	}
+	joinViaLink(t, e, sarah, wid, tok, omar)
+	setRole(t, e, sarah, wid, omarID, "viewer")
 
-	// Demotion revokes the editor link he joined with (404), and even a live
-	// link never changes an existing membership.
-	if code, _ := do(t, e, "POST", "/api/v1/invite/"+tok+"/accept", omar, nil); code != 404 {
-		t.Fatalf("re-accept revoked link after demotion: want 404, got %d", code)
+	code, ab := acceptLink(t, e, tok, omar)
+	if code != http.StatusOK || dataOf(ab)["status"] != "member" || dataOf(ab)["role"] != "viewer" {
+		t.Fatalf("re-accept as a demoted member: want 200 member viewer, got %d %v", code, dataOf(ab))
 	}
-	if _, ab := do(t, e, "POST", "/api/v1/invite/"+editorLink(t, e, sarah, wid)+"/accept", omar, nil); dataOf(ab)["role"] != "viewer" {
-		t.Fatalf("accept fresh editor link as a viewer member: want viewer kept, got %v", dataOf(ab)["role"])
-	}
-	_, wb := do(t, e, "GET", "/api/v1/weddings/"+wid, omar, nil)
-	if dataOf(wb)["my_role"] != "viewer" {
-		t.Fatalf("my_role after re-accept: want viewer, got %v", dataOf(wb)["my_role"])
-	}
-}
-
-// The app's mitigation for demote → leave → rejoin: after a demotion the
-// owner revokes the editor links, and a revoked link can't re-admit anyone.
-func TestRevokedEditorLinkBlocksRejoinAfterDemotion(t *testing.T) {
-	e := newApp(t)
-	sarah, _ := register(t, e, "sarah")
-	omar, omarID := register(t, e, "omar")
-	wid := createWedding(t, e, sarah, "L&O")
-
-	_, lb := do(t, e, "POST", "/api/v1/weddings/"+wid+"/invite-links", sarah, map[string]any{"role": "editor"})
-	link := dataOf(lb)
-	tok, _ := link["token"].(string)
-	linkID, _ := link["id"].(string)
-	do(t, e, "POST", "/api/v1/invite/"+tok+"/accept", omar, nil)
-	do(t, e, "PATCH", "/api/v1/weddings/"+wid+"/members/"+omarID, sarah, map[string]any{"role": "viewer"})
-	if code, _ := do(t, e, "DELETE", "/api/v1/weddings/"+wid+"/invite-links/"+linkID, sarah, nil); code != 200 {
-		t.Fatalf("revoke: want 200, got %d", code)
-	}
-
-	// omar leaves, then tries the old editor link.
-	if code, _ := do(t, e, "DELETE", "/api/v1/weddings/"+wid+"/members/"+omarID, omar, nil); code != 200 {
-		t.Fatalf("leave: want 200, got %d", code)
-	}
-	if code, _ := do(t, e, "POST", "/api/v1/invite/"+tok+"/accept", omar, nil); code != 404 {
-		t.Fatalf("rejoin via revoked link: want 404, got %d", code)
-	}
-	if code, _ := do(t, e, "GET", "/api/v1/weddings/"+wid, omar, nil); code != 404 {
-		t.Fatalf("omar after failed rejoin: want 404 (not a member), got %d", code)
+	if r := myRole(t, e, wid, omar); r != "viewer" {
+		t.Fatalf("my_role after re-accept: want viewer, got %v", r)
 	}
 }

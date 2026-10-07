@@ -84,6 +84,7 @@ func (r *WeddingRepo) Delete(ctx context.Context, id uuid.UUID) error {
 			"DELETE FROM invite_links WHERE wedding_id = ?",
 			"DELETE FROM memberships WHERE wedding_id = ?",
 			"DELETE FROM membership_ceilings WHERE wedding_id = ?",
+			"DELETE FROM join_requests WHERE wedding_id = ?",
 		} {
 			if err := tx.Exec(q, id).Error; err != nil {
 				return err
@@ -152,9 +153,8 @@ func (r *WeddingRepo) UpsertMembership(ctx context.Context, weddingID, userID uu
 
 // SetMemberRole changes an existing member's role (owner decision), or
 // ErrNotFound. The role is also recorded as the member's ceiling, in the same
-// transaction, so an invite link can't later grant more; and if it drops them
-// below the role of the link they joined with, that link is revoked (else a
-// second account could reuse it).
+// transaction, so a later join request through an invite link can't ask for
+// more.
 func (r *WeddingRepo) SetMemberRole(ctx context.Context, weddingID, userID uuid.UUID, role models.Role) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		res := tx.Model(&models.Membership{}).
@@ -166,11 +166,6 @@ func (r *WeddingRepo) SetMemberRole(ctx context.Context, weddingID, userID uuid.
 		if res.RowsAffected == 0 {
 			return ErrNotFound
 		}
-		if role == models.RoleViewer {
-			if err := revokeJoinLink(tx, weddingID, userID, models.RoleEditor); err != nil {
-				return err
-			}
-		}
 		return setCeiling(tx, weddingID, userID, string(role))
 	})
 }
@@ -179,15 +174,10 @@ func (r *WeddingRepo) SetMemberRole(ctx context.Context, weddingID, userID uuid.
 // someone (byOwner), that is recorded as a "none" ceiling so invite links
 // can't re-admit them, and their pending username invites to this wedding are
 // withdrawn (an old one would otherwise block a fresh owner invite). A member
-// leaving on their own keeps any earlier ceiling. An owner removal also
-// revokes the invite link they joined with, so a second account can't reuse it.
+// leaving on their own keeps any earlier ceiling. Invite links are left
+// active: joining through one needs the owner's approval anyway.
 func (r *WeddingRepo) RemoveMember(ctx context.Context, weddingID, userID uuid.UUID, byOwner bool) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if byOwner {
-			if err := revokeJoinLink(tx, weddingID, userID, ""); err != nil {
-				return err
-			}
-		}
 		res := tx.Where("wedding_id = ? AND user_id = ?", weddingID, userID).
 			Delete(&models.Membership{})
 		if res.Error != nil {
@@ -239,20 +229,6 @@ func (r *WeddingRepo) GetCeiling(ctx context.Context, weddingID, userID uuid.UUI
 // owner username invite the user accepted).
 func (r *WeddingRepo) SetCeiling(ctx context.Context, weddingID, userID uuid.UUID, maxRole string) error {
 	return setCeiling(r.db.WithContext(ctx), weddingID, userID, maxRole)
-}
-
-// revokeJoinLink revokes the invite link the member joined with (if any), or
-// only when that link grants onlyRole (when non-empty).
-func revokeJoinLink(tx *gorm.DB, weddingID, userID uuid.UUID, onlyRole models.Role) error {
-	q := `UPDATE invite_links SET revoked = true
-		WHERE wedding_id = ? AND revoked = false
-		  AND id = (SELECT via_link_id FROM memberships WHERE wedding_id = ? AND user_id = ?)`
-	args := []any{weddingID, weddingID, userID}
-	if onlyRole != "" {
-		q += " AND role = ?"
-		args = append(args, onlyRole)
-	}
-	return tx.Exec(q, args...).Error
 }
 
 func setCeiling(tx *gorm.DB, weddingID, userID uuid.UUID, maxRole string) error {

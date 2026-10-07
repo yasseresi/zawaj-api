@@ -36,7 +36,6 @@ func (h *Wedding) Register(rg *gin.RouterGroup) {
 	a.POST("/weddings", h.create)
 	a.GET("/weddings", h.list)
 	a.GET("/invite/:token", h.previewInvite)
-	a.POST("/invite/:token/accept", h.acceptInvite)
 
 	viewer := models.RoleViewer
 	owner := models.RoleOwner
@@ -186,7 +185,7 @@ func (h *Wedding) members(c *gin.Context) {
 
 // setRole godoc
 // @Summary  Change a member's role (owner only)
-// @Description Demoting an editor to viewer also revokes the editor invite link they joined with (if any).
+// @Description The role is also recorded as the member's ceiling: a later join request through an invite link can't ask for more.
 // @Tags     members
 // @Accept   json
 // @Produce  json
@@ -225,7 +224,7 @@ func (h *Wedding) setRole(c *gin.Context) {
 // @Summary  Remove a member or leave
 // @Description Owner can remove anyone; any member can remove themselves (leave).
 // @Description An owner removal is remembered: invite links can no longer re-admit that user (only a new username invite can).
-// @Description It also revokes the invite link they joined with, and withdraws their pending username invites.
+// @Description It also withdraws their pending username invites. Invite links stay active.
 // @Tags     members
 // @Produce  json
 // @Security BearerAuth
@@ -375,29 +374,6 @@ func (h *Wedding) transferOwnership(c *gin.Context) {
 
 func (h *Wedding) previewInvite(c *gin.Context) {
 	p, err := h.svc.PreviewInvite(c.Request.Context(), c.Param("token"))
-	if err != nil {
-		apperr.Write(c, err)
-		return
-	}
-	response.JSON(c, http.StatusOK, p)
-}
-
-// acceptInvite godoc
-// @Summary  Accept an invite
-// @Description Joins the wedding at the link's role. An existing member keeps their current role (links never change a membership; owners use PATCH /members).
-// @Description A former member rejoins at most at the role the owner last set; one the owner removed gets 403 removed_from_wedding.
-// @Tags     invites
-// @Produce  json
-// @Security BearerAuth
-// @Param    token path string true "Invite token"
-// @Success  200 {object} response.Envelope
-// @Failure  403 {object} response.Envelope{error=response.APIError} "removed_from_wedding"
-// @Failure  404 {object} response.Envelope{error=response.APIError}
-// @Failure  409 {object} response.Envelope{error=response.APIError}
-// @Router   /invite/{token}/accept [post]
-func (h *Wedding) acceptInvite(c *gin.Context) {
-	userID, _ := middleware.UserID(c)
-	p, err := h.svc.AcceptInvite(c.Request.Context(), c.Param("token"), userID)
 	if err != nil {
 		apperr.Write(c, err)
 		return

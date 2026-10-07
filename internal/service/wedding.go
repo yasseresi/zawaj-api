@@ -147,7 +147,7 @@ type InvitePreview struct {
 
 // PreviewInvite resolves a token to the wedding + role it grants.
 func (s *WeddingService) PreviewInvite(ctx context.Context, tok string) (*InvitePreview, error) {
-	l, err := s.validLink(ctx, tok)
+	l, err := validLink(ctx, s.weddings, tok)
 	if err != nil {
 		return nil, err
 	}
@@ -156,55 +156,6 @@ func (s *WeddingService) PreviewInvite(ctx context.Context, tok string) (*Invite
 		return nil, apperr.NotFound("invite not found")
 	}
 	return &InvitePreview{WeddingID: w.ID, WeddingName: w.Name, Role: l.Role}, nil
-}
-
-// AcceptInvite joins the caller to the wedding with the link's role. Idempotent.
-// A link only ever creates a membership: an existing member keeps their
-// current role. It also never overrides the owner's last decision about a
-// former member: a demoted member who left rejoins at most at the role the
-// owner set, and one the owner removed is refused (only a new owner invite by
-// username re-admits them).
-func (s *WeddingService) AcceptInvite(ctx context.Context, tok string, userID uuid.UUID) (*InvitePreview, error) {
-	l, err := s.validLink(ctx, tok)
-	if err != nil {
-		return nil, err
-	}
-	// Existing members keep their role (owner opening a viewer link, an editor
-	// re-opening a link, a demoted viewer re-opening the editor link they
-	// joined with). Role changes go through SetMemberRole only.
-	existing, gerr := s.weddings.GetRole(ctx, l.WeddingID, userID)
-	if gerr == nil {
-		w, _ := s.weddings.ByID(ctx, l.WeddingID)
-		return &InvitePreview{WeddingID: l.WeddingID, WeddingName: name(w), Role: existing}, nil
-	}
-	if !errors.Is(gerr, repository.ErrNotFound) {
-		return nil, apperr.Internal("join failed")
-	}
-	role, err := s.cappedRole(ctx, l.WeddingID, userID, l.Role)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.weddings.UpsertMembership(ctx, l.WeddingID, userID, role, &l.ID); err != nil {
-		return nil, apperr.Internal("join failed")
-	}
-	w, err := s.weddings.ByID(ctx, l.WeddingID)
-	if err != nil {
-		return nil, apperr.Internal("join failed")
-	}
-	return &InvitePreview{WeddingID: w.ID, WeddingName: w.Name, Role: role}, nil
-}
-
-// cappedRole applies the user's membership ceiling (if any) to role: a
-// removed user is refused, a demoted one gets at most the owner's role.
-func (s *WeddingService) cappedRole(ctx context.Context, weddingID, userID uuid.UUID, role models.Role) (models.Role, error) {
-	c, err := s.weddings.GetCeiling(ctx, weddingID, userID)
-	if errors.Is(err, repository.ErrNotFound) {
-		return role, nil
-	}
-	if err != nil {
-		return "", apperr.Internal("join failed")
-	}
-	return applyCeiling(c, role)
 }
 
 // applyCeiling caps role at the ceiling c (shared by link and username invites).
@@ -218,8 +169,9 @@ func applyCeiling(c *repository.Ceiling, role models.Role) (models.Role, error) 
 	return role, nil
 }
 
-func (s *WeddingService) validLink(ctx context.Context, tok string) (*models.InviteLink, error) {
-	l, err := s.weddings.LinkByToken(ctx, tok)
+// validLink resolves an invite token to a live (not revoked, not expired) link.
+func validLink(ctx context.Context, weddings *repository.WeddingRepo, tok string) (*models.InviteLink, error) {
+	l, err := weddings.LinkByToken(ctx, tok)
 	if errors.Is(err, repository.ErrNotFound) {
 		return nil, apperr.NotFound("invite not found")
 	}

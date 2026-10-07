@@ -50,6 +50,9 @@ func SelfInvite(msg string) *Error {
 func RemovedFromWedding(msg string) *Error {
 	return New(http.StatusForbidden, response.CodeRemovedFromWedding, msg)
 }
+func JoinRequestDeclined(msg string) *Error {
+	return New(http.StatusConflict, response.CodeJoinRequestDeclined, msg)
+}
 func Locked(msg string) *Error { return New(http.StatusLocked, response.CodeLocked, msg) }
 func RateLimited(msg string) *Error {
 	return New(http.StatusTooManyRequests, response.CodeRateLimited, msg)

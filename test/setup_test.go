@@ -87,6 +87,9 @@ func newAppWithDB(t *testing.T, pusher push.Sender) (*gin.Engine, *gorm.DB) {
 		handler.NewInvite(
 			service.NewInviteService(repository.NewInviteRepo(db), weddingRepo, userRepo, activitySvc, notifSvc),
 			weddingRepo, tokens),
+		handler.NewJoinRequest(
+			service.NewJoinService(weddingRepo, repository.NewJoinRequestRepo(db), userRepo, activitySvc, notifSvc),
+			auditSvc, weddingRepo, tokens),
 	)
 	return e, db
 }
@@ -94,7 +97,7 @@ func newAppWithDB(t *testing.T, pusher push.Sender) (*gin.Engine, *gorm.DB) {
 // cleanDB truncates all tables so each test starts from empty.
 func cleanDB(t *testing.T, db *gorm.DB) {
 	t.Helper()
-	err := db.Exec("TRUNCATE users, weddings, memberships, membership_ceilings, invite_links, guests, guest_notes, activity_logs, notifications, device_tokens, refresh_tokens, idempotency_keys, audit_logs RESTART IDENTITY CASCADE").Error
+	err := db.Exec("TRUNCATE users, weddings, memberships, membership_ceilings, join_requests, invite_links, guests, guest_notes, activity_logs, notifications, device_tokens, refresh_tokens, idempotency_keys, audit_logs RESTART IDENTITY CASCADE").Error
 	if err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
@@ -178,8 +181,8 @@ func joinAs(t *testing.T, e *gin.Engine, ownerTok, wid, role, memberTok string) 
 	t.Helper()
 	_, lb := do(t, e, "POST", "/api/v1/weddings/"+wid+"/invite-links", ownerTok, map[string]any{"role": role})
 	tok, _ := dataOf(lb)["token"].(string)
-	if code, b := do(t, e, "POST", "/api/v1/invite/"+tok+"/accept", memberTok, nil); code != 200 {
-		t.Fatalf("join as %s: want 200, got %d (%v)", role, code, b)
+	if got := joinViaLink(t, e, ownerTok, wid, tok, memberTok); got != role {
+		t.Fatalf("join as %s: got role %v", role, got)
 	}
 }
 

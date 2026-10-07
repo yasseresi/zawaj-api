@@ -44,6 +44,29 @@ type WeddingInvite struct {
 	Status    InviteStatus `gorm:"size:10;not null" json:"status"` // pending | accepted | declined | revoked
 }
 
+// JoinRequestStatus is the lifecycle of a request to join through an invite link.
+type JoinRequestStatus string
+
+const (
+	JoinPending  JoinRequestStatus = "pending"
+	JoinApproved JoinRequestStatus = "approved"
+	JoinDeclined JoinRequestStatus = "declined"
+)
+
+// JoinRequest is created when someone accepts an invite link: they become a
+// member only once the owner approves (schema: migration 000012). Role is what
+// the link grants, already capped by any earlier owner decision.
+type JoinRequest struct {
+	Base
+	WeddingID uuid.UUID         `gorm:"type:uuid;not null;uniqueIndex:idx_join_requests_pending,where:status = 'pending';index:idx_join_requests_wedding_status,priority:1" json:"wedding_id"`
+	UserID    uuid.UUID         `gorm:"type:uuid;not null;uniqueIndex:idx_join_requests_pending,where:status = 'pending';index:idx_join_requests_user" json:"user_id"`
+	LinkID    uuid.UUID         `gorm:"type:uuid;not null" json:"link_id"`
+	Role      Role              `gorm:"size:10;not null" json:"role"`
+	Status    JoinRequestStatus `gorm:"size:10;not null;default:pending;index:idx_join_requests_wedding_status,priority:2" json:"status"`
+	DecidedAt *time.Time        `json:"decided_at,omitempty"`
+	DecidedBy *uuid.UUID        `gorm:"type:uuid" json:"decided_by,omitempty"`
+}
+
 // ActivityAction enumerates entries in the activity feed / per-guest history.
 type ActivityAction string
 

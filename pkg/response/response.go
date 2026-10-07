@@ -21,6 +21,9 @@ const (
 	// CodeRemovedFromWedding: the owner removed this user; only a new owner
 	// invite (by username) can re-admit them, not an invite link.
 	CodeRemovedFromWedding = "removed_from_wedding"
+	// CodeJoinRequestDeclined: the owner recently declined this user's join
+	// request; they can ask again after a cooldown.
+	CodeJoinRequestDeclined = "join_request_declined"
 )
 
 // Envelope is the single response shape for the whole API.

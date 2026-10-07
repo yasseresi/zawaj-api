@@ -223,6 +223,7 @@ func (h *Wedding) setRole(c *gin.Context) {
 // removeMember godoc
 // @Summary  Remove a member or leave
 // @Description Owner can remove anyone; any member can remove themselves (leave).
+// @Description An owner removal is remembered: invite links can no longer re-admit that user (only a new username invite can).
 // @Tags     members
 // @Produce  json
 // @Security BearerAuth
@@ -246,7 +247,7 @@ func (h *Wedding) removeMember(c *gin.Context) {
 		return
 	}
 	wid := middleware.WeddingID(c)
-	if err := h.svc.RemoveMember(c.Request.Context(), wid, targetID); err != nil {
+	if err := h.svc.RemoveMember(c.Request.Context(), wid, targetID, targetID != callerID); err != nil {
 		apperr.Write(c, err)
 		return
 	}
@@ -382,11 +383,13 @@ func (h *Wedding) previewInvite(c *gin.Context) {
 // acceptInvite godoc
 // @Summary  Accept an invite
 // @Description Joins the wedding at the link's role. An existing member keeps their current role (links never change a membership; owners use PATCH /members).
+// @Description A former member rejoins at most at the role the owner last set; one the owner removed gets 403 removed_from_wedding.
 // @Tags     invites
 // @Produce  json
 // @Security BearerAuth
 // @Param    token path string true "Invite token"
 // @Success  200 {object} response.Envelope
+// @Failure  403 {object} response.Envelope{error=response.APIError} "removed_from_wedding"
 // @Failure  404 {object} response.Envelope{error=response.APIError}
 // @Failure  409 {object} response.Envelope{error=response.APIError}
 // @Router   /invite/{token}/accept [post]

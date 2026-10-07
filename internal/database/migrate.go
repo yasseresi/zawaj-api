@@ -13,6 +13,7 @@ func Migrate(db *gorm.DB) error {
 		&models.User{},
 		&models.Wedding{},
 		&models.Membership{},
+		&models.MembershipCeiling{},
 		&models.InviteLink{},
 		&models.WeddingInvite{},
 		&models.Guest{},

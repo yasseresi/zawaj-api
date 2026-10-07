@@ -106,9 +106,27 @@ func (s *InviteService) Accept(ctx context.Context, inviteID, userID uuid.UUID) 
 	if err != nil {
 		return nil, err
 	}
+	// An invite the owner sent after their last decision about this user (a
+	// demotion or removal) supersedes it and clears it. An older invite still
+	// obeys that decision: capped at the role set, or refused if removed.
+	role := inv.Role
+	ceiling, cerr := s.weddings.GetCeiling(ctx, inv.WeddingID, userID)
+	switch {
+	case errors.Is(cerr, repository.ErrNotFound):
+	case cerr != nil:
+		return nil, apperr.Internal("join failed")
+	case inv.CreatedAt.Before(ceiling.SetAt):
+		if role, err = applyCeiling(ceiling, role); err != nil {
+			return nil, err
+		}
+	default:
+		if err := s.weddings.ClearCeiling(ctx, inv.WeddingID, userID); err != nil {
+			return nil, apperr.Internal("join failed")
+		}
+	}
 	// Never downgrade an existing higher role.
-	if existing, gerr := s.weddings.GetRole(ctx, inv.WeddingID, userID); gerr != nil || existing.Rank() < inv.Role.Rank() {
-		if uerr := s.weddings.UpsertMembership(ctx, inv.WeddingID, userID, inv.Role); uerr != nil {
+	if existing, gerr := s.weddings.GetRole(ctx, inv.WeddingID, userID); gerr != nil || existing.Rank() < role.Rank() {
+		if uerr := s.weddings.UpsertMembership(ctx, inv.WeddingID, userID, role); uerr != nil {
 			return nil, apperr.Internal("join failed")
 		}
 	}

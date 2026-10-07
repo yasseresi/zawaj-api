@@ -18,6 +18,9 @@ const (
 	CodeInvitePending   = "invite_pending"
 	CodeAlreadyMember   = "already_member"
 	CodeSelfInvite      = "self_invite"
+	// CodeRemovedFromWedding: the owner removed this user; only a new owner
+	// invite (by username) can re-admit them, not an invite link.
+	CodeRemovedFromWedding = "removed_from_wedding"
 )
 
 // Envelope is the single response shape for the whole API.

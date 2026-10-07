@@ -160,8 +160,10 @@ func (s *WeddingService) PreviewInvite(ctx context.Context, tok string) (*Invite
 
 // AcceptInvite joins the caller to the wedding with the link's role. Idempotent.
 // A link only ever creates a membership: an existing member keeps their
-// current role, so a link can neither downgrade an owner nor undo an owner's
-// demotion of a member who still holds the link.
+// current role. It also never overrides the owner's last decision about a
+// former member: a demoted member who left rejoins at most at the role the
+// owner set, and one the owner removed is refused (only a new owner invite by
+// username re-admits them).
 func (s *WeddingService) AcceptInvite(ctx context.Context, tok string, userID uuid.UUID) (*InvitePreview, error) {
 	l, err := s.validLink(ctx, tok)
 	if err != nil {
@@ -178,14 +180,42 @@ func (s *WeddingService) AcceptInvite(ctx context.Context, tok string, userID uu
 	if !errors.Is(gerr, repository.ErrNotFound) {
 		return nil, apperr.Internal("join failed")
 	}
-	if err := s.weddings.UpsertMembership(ctx, l.WeddingID, userID, l.Role); err != nil {
+	role, err := s.cappedRole(ctx, l.WeddingID, userID, l.Role)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.weddings.UpsertMembership(ctx, l.WeddingID, userID, role); err != nil {
 		return nil, apperr.Internal("join failed")
 	}
 	w, err := s.weddings.ByID(ctx, l.WeddingID)
 	if err != nil {
 		return nil, apperr.Internal("join failed")
 	}
-	return &InvitePreview{WeddingID: w.ID, WeddingName: w.Name, Role: l.Role}, nil
+	return &InvitePreview{WeddingID: w.ID, WeddingName: w.Name, Role: role}, nil
+}
+
+// cappedRole applies the user's membership ceiling (if any) to role: a
+// removed user is refused, a demoted one gets at most the owner's role.
+func (s *WeddingService) cappedRole(ctx context.Context, weddingID, userID uuid.UUID, role models.Role) (models.Role, error) {
+	c, err := s.weddings.GetCeiling(ctx, weddingID, userID)
+	if errors.Is(err, repository.ErrNotFound) {
+		return role, nil
+	}
+	if err != nil {
+		return "", apperr.Internal("join failed")
+	}
+	return applyCeiling(c, role)
+}
+
+// applyCeiling caps role at the ceiling c (shared by link and username invites).
+func applyCeiling(c *repository.Ceiling, role models.Role) (models.Role, error) {
+	if c.MaxRole == repository.CeilingRemoved {
+		return "", apperr.RemovedFromWedding("you were removed from this wedding; ask the owner to invite you again")
+	}
+	if max := models.Role(c.MaxRole); max.Rank() < role.Rank() {
+		return max, nil
+	}
+	return role, nil
 }
 
 func (s *WeddingService) validLink(ctx context.Context, tok string) (*models.InviteLink, error) {
@@ -239,9 +269,10 @@ func (s *WeddingService) SetMemberRole(ctx context.Context, weddingID, targetID 
 	return nil
 }
 
-// RemoveMember removes a collaborator (owner action) or lets a member leave.
-// The owner cannot be removed or leave (must transfer ownership first — later).
-func (s *WeddingService) RemoveMember(ctx context.Context, weddingID, targetID uuid.UUID) error {
+// RemoveMember removes a collaborator (owner action, byOwner) or lets a member
+// leave. An owner removal is remembered so invite links can't re-admit them.
+// The owner cannot be removed or leave (must transfer ownership first).
+func (s *WeddingService) RemoveMember(ctx context.Context, weddingID, targetID uuid.UUID, byOwner bool) error {
 	cur, err := s.weddings.GetRole(ctx, weddingID, targetID)
 	if errors.Is(err, repository.ErrNotFound) {
 		return apperr.NotFound("member not found")
@@ -252,7 +283,7 @@ func (s *WeddingService) RemoveMember(ctx context.Context, weddingID, targetID u
 	if cur == models.RoleOwner {
 		return apperr.Forbidden("the owner cannot be removed")
 	}
-	if err := s.weddings.RemoveMember(ctx, weddingID, targetID); err != nil {
+	if err := s.weddings.RemoveMember(ctx, weddingID, targetID, byOwner); err != nil {
 		return apperr.Internal("remove member failed")
 	}
 	return nil

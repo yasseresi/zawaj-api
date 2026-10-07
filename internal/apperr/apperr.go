@@ -47,6 +47,9 @@ func AlreadyMember(msg string) *Error {
 func SelfInvite(msg string) *Error {
 	return New(http.StatusBadRequest, response.CodeSelfInvite, msg)
 }
+func RemovedFromWedding(msg string) *Error {
+	return New(http.StatusForbidden, response.CodeRemovedFromWedding, msg)
+}
 func Locked(msg string) *Error { return New(http.StatusLocked, response.CodeLocked, msg) }
 func RateLimited(msg string) *Error {
 	return New(http.StatusTooManyRequests, response.CodeRateLimited, msg)

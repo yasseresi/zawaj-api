@@ -83,6 +83,7 @@ func (r *WeddingRepo) Delete(ctx context.Context, id uuid.UUID) error {
 			"DELETE FROM activity_logs WHERE wedding_id = ?",
 			"DELETE FROM invite_links WHERE wedding_id = ?",
 			"DELETE FROM memberships WHERE wedding_id = ?",
+			"DELETE FROM membership_ceilings WHERE wedding_id = ?",
 		} {
 			if err := tx.Exec(q, id).Error; err != nil {
 				return err
@@ -147,32 +148,83 @@ func (r *WeddingRepo) UpsertMembership(ctx context.Context, weddingID, userID uu
 	return r.db.WithContext(ctx).Save(&m).Error
 }
 
-// SetMemberRole changes an existing member's role, or ErrNotFound.
+// SetMemberRole changes an existing member's role (owner decision), or
+// ErrNotFound. The role is also recorded as the member's ceiling, in the same
+// transaction, so an invite link can't later grant more.
 func (r *WeddingRepo) SetMemberRole(ctx context.Context, weddingID, userID uuid.UUID, role models.Role) error {
-	res := r.db.WithContext(ctx).Model(&models.Membership{}).
-		Where("wedding_id = ? AND user_id = ?", weddingID, userID).
-		Update("role", role)
-	if res.Error != nil {
-		return res.Error
-	}
-	if res.RowsAffected == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&models.Membership{}).
+			Where("wedding_id = ? AND user_id = ?", weddingID, userID).
+			Update("role", role)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return ErrNotFound
+		}
+		return setCeiling(tx, weddingID, userID, string(role))
+	})
 }
 
-// RemoveMember deletes a membership, or ErrNotFound.
-func (r *WeddingRepo) RemoveMember(ctx context.Context, weddingID, userID uuid.UUID) error {
-	res := r.db.WithContext(ctx).
-		Where("wedding_id = ? AND user_id = ?", weddingID, userID).
-		Delete(&models.Membership{})
+// RemoveMember deletes a membership, or ErrNotFound. When the owner removes
+// someone (byOwner), that is recorded as a "none" ceiling so invite links
+// can't re-admit them; a member leaving on their own keeps any earlier ceiling.
+func (r *WeddingRepo) RemoveMember(ctx context.Context, weddingID, userID uuid.UUID, byOwner bool) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Where("wedding_id = ? AND user_id = ?", weddingID, userID).
+			Delete(&models.Membership{})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return ErrNotFound
+		}
+		if !byOwner {
+			return nil
+		}
+		return setCeiling(tx, weddingID, userID, CeilingRemoved)
+	})
+}
+
+// ─── Membership ceilings ────────────────────────────────────────────────────
+
+// CeilingRemoved is the ceiling recorded when the owner removes a member.
+const CeilingRemoved = "none"
+
+// Ceiling is the owner's last decision about a (former) member: the highest
+// role invite links may grant them ("editor"/"viewer"), or CeilingRemoved.
+type Ceiling struct {
+	MaxRole string
+	SetAt   time.Time
+}
+
+// GetCeiling returns the user's ceiling on a wedding, or ErrNotFound.
+func (r *WeddingRepo) GetCeiling(ctx context.Context, weddingID, userID uuid.UUID) (*Ceiling, error) {
+	var c Ceiling
+	res := r.db.WithContext(ctx).Raw(
+		"SELECT max_role, set_at FROM membership_ceilings WHERE wedding_id = ? AND user_id = ?",
+		weddingID, userID).Scan(&c)
 	if res.Error != nil {
-		return res.Error
+		return nil, res.Error
 	}
 	if res.RowsAffected == 0 {
-		return ErrNotFound
+		return nil, ErrNotFound
 	}
-	return nil
+	return &c, nil
+}
+
+// ClearCeiling drops the user's ceiling (the owner re-invited them).
+func (r *WeddingRepo) ClearCeiling(ctx context.Context, weddingID, userID uuid.UUID) error {
+	return r.db.WithContext(ctx).Exec(
+		"DELETE FROM membership_ceilings WHERE wedding_id = ? AND user_id = ?", weddingID, userID).Error
+}
+
+func setCeiling(tx *gorm.DB, weddingID, userID uuid.UUID, maxRole string) error {
+	return tx.Exec(`INSERT INTO membership_ceilings (wedding_id, user_id, max_role, set_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT (wedding_id, user_id) DO UPDATE SET max_role = EXCLUDED.max_role, set_at = EXCLUDED.set_at`,
+		// App clock, like invites' created_at, so the two compare consistently.
+		weddingID, userID, maxRole, time.Now()).Error
 }
 
 // TransferOwnership atomically hands a wedding to newOwnerID: it flips the

@@ -592,7 +592,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Joins the wedding at the link's role. An existing member keeps their current role (links never change a membership; owners use PATCH /members).",
+                "description": "Joins the wedding at the link's role. An existing member keeps their current role (links never change a membership; owners use PATCH /members).\nA former member rejoins at most at the role the owner last set; one the owner removed gets 403 removed_from_wedding.",
                 "produces": [
                     "application/json"
                 ],
@@ -614,6 +614,24 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/zawaj_pkg_response.Envelope"
+                        }
+                    },
+                    "403": {
+                        "description": "removed_from_wedding",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/zawaj_pkg_response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/zawaj_pkg_response.APIError"
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     },
                     "404": {
@@ -686,7 +704,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Grants the caller membership per the invite's role.",
+                "description": "Grants the caller membership per the invite's role. An invite sent after the owner demoted/removed the user supersedes that decision; an older one is capped by it (403 removed_from_wedding if removed).",
                 "produces": [
                     "application/json"
                 ],
@@ -708,6 +726,24 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/zawaj_pkg_response.Envelope"
+                        }
+                    },
+                    "403": {
+                        "description": "removed_from_wedding",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/zawaj_pkg_response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/zawaj_pkg_response.APIError"
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     },
                     "404": {
@@ -3205,7 +3241,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Owner can remove anyone; any member can remove themselves (leave).",
+                "description": "Owner can remove anyone; any member can remove themselves (leave).\nAn owner removal is remembered: invite links can no longer re-admit that user (only a new username invite can).",
                 "produces": [
                     "application/json"
                 ],

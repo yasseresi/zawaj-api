@@ -592,7 +592,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Joins the wedding at the link's role; never downgrades an existing higher role.",
+                "description": "Joins the wedding at the link's role. An existing member keeps their current role (links never change a membership; owners use PATCH /members).",
                 "produces": [
                     "application/json"
                 ],

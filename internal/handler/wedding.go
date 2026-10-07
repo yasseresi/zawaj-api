@@ -381,7 +381,7 @@ func (h *Wedding) previewInvite(c *gin.Context) {
 
 // acceptInvite godoc
 // @Summary  Accept an invite
-// @Description Joins the wedding at the link's role; never downgrades an existing higher role.
+// @Description Joins the wedding at the link's role. An existing member keeps their current role (links never change a membership; owners use PATCH /members).
 // @Tags     invites
 // @Produce  json
 // @Security BearerAuth

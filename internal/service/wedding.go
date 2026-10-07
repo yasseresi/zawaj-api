@@ -158,19 +158,25 @@ func (s *WeddingService) PreviewInvite(ctx context.Context, tok string) (*Invite
 	return &InvitePreview{WeddingID: w.ID, WeddingName: w.Name, Role: l.Role}, nil
 }
 
-// AcceptInvite joins the caller to the wedding with the link's role. Idempotent;
-// never downgrades an existing owner.
+// AcceptInvite joins the caller to the wedding with the link's role. Idempotent.
+// A link only ever creates a membership: an existing member keeps their
+// current role, so a link can neither downgrade an owner nor undo an owner's
+// demotion of a member who still holds the link.
 func (s *WeddingService) AcceptInvite(ctx context.Context, tok string, userID uuid.UUID) (*InvitePreview, error) {
 	l, err := s.validLink(ctx, tok)
 	if err != nil {
 		return nil, err
 	}
-	// Never downgrade an existing membership: if the caller already holds a role
-	// at least as high as the link's, keep it (owner accepting a viewer link, an
-	// editor re-opening a viewer link, etc.).
-	if existing, gerr := s.weddings.GetRole(ctx, l.WeddingID, userID); gerr == nil && existing.Rank() >= l.Role.Rank() {
+	// Existing members keep their role (owner opening a viewer link, an editor
+	// re-opening a link, a demoted viewer re-opening the editor link they
+	// joined with). Role changes go through SetMemberRole only.
+	existing, gerr := s.weddings.GetRole(ctx, l.WeddingID, userID)
+	if gerr == nil {
 		w, _ := s.weddings.ByID(ctx, l.WeddingID)
 		return &InvitePreview{WeddingID: l.WeddingID, WeddingName: name(w), Role: existing}, nil
+	}
+	if !errors.Is(gerr, repository.ErrNotFound) {
+		return nil, apperr.Internal("join failed")
 	}
 	if err := s.weddings.UpsertMembership(ctx, l.WeddingID, userID, l.Role); err != nil {
 		return nil, apperr.Internal("join failed")

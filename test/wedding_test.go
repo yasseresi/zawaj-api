@@ -165,3 +165,30 @@ func TestDeviceRegistration(t *testing.T) {
 		t.Fatalf("unauth register: want 401, got %d", code)
 	}
 }
+
+// Owner role decisions stick: a demoted member can't re-open the editor link
+// they joined with to get editor back. Links only ever create memberships.
+func TestInviteLinkCannotUndoDemotion(t *testing.T) {
+	e := newApp(t)
+	sarah, _ := register(t, e, "sarah")
+	omar, omarID := register(t, e, "omar")
+	wid := createWedding(t, e, sarah, "L&O")
+
+	_, lb := do(t, e, "POST", "/api/v1/weddings/"+wid+"/invite-links", sarah, map[string]any{"role": "editor"})
+	tok, _ := dataOf(lb)["token"].(string)
+	if code, _ := do(t, e, "POST", "/api/v1/invite/"+tok+"/accept", omar, nil); code != 200 {
+		t.Fatalf("join: want 200, got %d", code)
+	}
+	if code, _ := do(t, e, "PATCH", "/api/v1/weddings/"+wid+"/members/"+omarID, sarah, map[string]any{"role": "viewer"}); code != 200 {
+		t.Fatalf("demote: want 200, got %d", code)
+	}
+
+	_, ab := do(t, e, "POST", "/api/v1/invite/"+tok+"/accept", omar, nil)
+	if dataOf(ab)["role"] != "viewer" {
+		t.Fatalf("re-accept after demotion: want viewer, got %v", dataOf(ab)["role"])
+	}
+	_, wb := do(t, e, "GET", "/api/v1/weddings/"+wid, omar, nil)
+	if dataOf(wb)["my_role"] != "viewer" {
+		t.Fatalf("my_role after re-accept: want viewer, got %v", dataOf(wb)["my_role"])
+	}
+}

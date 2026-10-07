@@ -27,6 +27,9 @@ const (
 	InvitePending  InviteStatus = "pending"
 	InviteAccepted InviteStatus = "accepted"
 	InviteDeclined InviteStatus = "declined"
+	// InviteRevoked: withdrawn because the owner removed the invitee from the
+	// wedding; a fresh invite is needed to re-admit them.
+	InviteRevoked InviteStatus = "revoked"
 )
 
 // WeddingInvite is a targeted invitation for a specific registered user to join
@@ -38,7 +41,7 @@ type WeddingInvite struct {
 	InviterID uuid.UUID    `gorm:"type:uuid;not null" json:"inviter_id"`
 	InviteeID uuid.UUID    `gorm:"type:uuid;not null;index" json:"invitee_id"`
 	Role      Role         `gorm:"size:10;not null" json:"role"`   // editor | viewer (never owner)
-	Status    InviteStatus `gorm:"size:10;not null" json:"status"` // pending | accepted | declined
+	Status    InviteStatus `gorm:"size:10;not null" json:"status"` // pending | accepted | declined | revoked
 }
 
 // ActivityAction enumerates entries in the activity feed / per-guest history.

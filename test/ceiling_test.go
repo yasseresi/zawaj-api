@@ -162,14 +162,27 @@ func TestInviteSentBeforeRemovalCannotReadmit(t *testing.T) {
 	omar, omarID := register(t, e, "omar")
 	wid := createWedding(t, e, sarah, "L&O")
 
-	// Invite pending, but omar joins by link first, then is removed.
+	// Invite pending, but omar joins by link first, then is removed. The
+	// removal withdraws the pending invite, so it can't re-admit him...
 	inviteID := ownerInvite(t, e, sarah, wid, "omar", "editor")
 	acceptLink(t, e, editorLink(t, e, sarah, wid), omar)
 	leave(t, e, wid, omarID, sarah)
 
-	code, body := do(t, e, http.MethodPost, "/api/v1/invites/"+inviteID+"/accept", omar, nil)
-	if code != http.StatusForbidden || errCode(body) != "removed_from_wedding" {
-		t.Fatalf("stale invite after removal: want 403 removed_from_wedding, got %d %v", code, errCode(body))
+	if code, _ := do(t, e, http.MethodPost, "/api/v1/invites/"+inviteID+"/accept", omar, nil); code != http.StatusNotFound {
+		t.Fatalf("stale invite after removal: want 404 (withdrawn), got %d", code)
+	}
+	_, lb := do(t, e, http.MethodGet, "/api/v1/invites", omar, nil)
+	if items, _ := dataOf(lb)["items"].([]any); len(items) != 0 {
+		t.Fatalf("withdrawn invite still listed: %v", items)
+	}
+
+	// ...and doesn't block the owner from inviting him back.
+	fresh := ownerInvite(t, e, sarah, wid, "omar", "viewer")
+	if code, _ := do(t, e, http.MethodPost, "/api/v1/invites/"+fresh+"/accept", omar, nil); code != http.StatusOK {
+		t.Fatalf("accept fresh invite: want 200, got %d", code)
+	}
+	if r := myRole(t, e, wid, omar); r != "viewer" {
+		t.Fatalf("my_role after fresh invite: want viewer, got %v", r)
 	}
 }
 

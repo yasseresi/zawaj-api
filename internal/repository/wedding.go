@@ -168,7 +168,9 @@ func (r *WeddingRepo) SetMemberRole(ctx context.Context, weddingID, userID uuid.
 
 // RemoveMember deletes a membership, or ErrNotFound. When the owner removes
 // someone (byOwner), that is recorded as a "none" ceiling so invite links
-// can't re-admit them; a member leaving on their own keeps any earlier ceiling.
+// can't re-admit them, and their pending username invites to this wedding are
+// withdrawn (an old one would otherwise block a fresh owner invite). A member
+// leaving on their own keeps any earlier ceiling.
 func (r *WeddingRepo) RemoveMember(ctx context.Context, weddingID, userID uuid.UUID, byOwner bool) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		res := tx.Where("wedding_id = ? AND user_id = ?", weddingID, userID).
@@ -181,6 +183,11 @@ func (r *WeddingRepo) RemoveMember(ctx context.Context, weddingID, userID uuid.U
 		}
 		if !byOwner {
 			return nil
+		}
+		if err := tx.Model(&models.WeddingInvite{}).
+			Where("wedding_id = ? AND invitee_id = ? AND status = ?", weddingID, userID, models.InvitePending).
+			Update("status", models.InviteRevoked).Error; err != nil {
+			return err
 		}
 		return setCeiling(tx, weddingID, userID, CeilingRemoved)
 	})

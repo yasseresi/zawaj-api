@@ -89,6 +89,10 @@ destructive prod changes.
 - Harder: query-plan visibility → enable GORM SQL logging in dev; index `wedding_id`,
   `username`, `share_code`.
 - **Action:** AutoMigrate for dev only; introduce golang-migrate before first real users.
+- **Update (2026-10-08):** done — production and the integration tests both build the
+  schema from the versioned SQL migrations (`database.RunMigrations`; the test harness
+  resets `zawaj_test` and migrates once per run). AutoMigrate is gone entirely, so tests
+  can't drift from the shipped schema.
 
 ---
 

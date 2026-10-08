@@ -1,9 +1,18 @@
 package test
 
 import (
+	"context"
+	"errors"
+	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	"zawaj/internal/repository"
+
+	"github.com/google/uuid"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -274,15 +283,19 @@ func TestParallelAcceptsCreateOneRequest(t *testing.T) {
 	wid := createWedding(t, e, sarah, "L&O")
 	tok := editorLink(t, e, sarah, wid)
 
+	const workers = 20
 	var wg sync.WaitGroup
-	codes := make(chan int, 5)
-	for i := 0; i < 5; i++ {
+	start := make(chan struct{})
+	codes := make(chan int, workers)
+	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			<-start // release together so the inserts genuinely race
 			codes <- serve(e, newReq(http.MethodPost, "/api/v1/invite/"+tok+"/accept", omar, nil)).Code
 		}()
 	}
+	close(start)
 	wg.Wait()
 	close(codes)
 	for c := range codes {
@@ -313,16 +326,21 @@ func TestParallelDecisionsOnOneRequest(t *testing.T) {
 	_, body := acceptLink(t, e, editorLink(t, e, sarah, wid), omar)
 	rid, _ := dataOf(body)["request_id"].(string)
 
-	codes := make(chan int, 2)
+	const workers = 20
+	codes := make(chan int, workers)
 	var wg sync.WaitGroup
-	for _, action := range []string{"approve", "decline"} {
+	start := make(chan struct{})
+	for i := 0; i < workers; i++ {
+		action := []string{"approve", "decline"}[i%2]
 		wg.Add(1)
-		go func(action string) {
+		go func() {
 			defer wg.Done()
+			<-start
 			rec := serve(e, newReq(http.MethodPost, "/api/v1/weddings/"+wid+"/join-requests/"+rid+"/"+action, sarah, nil))
 			codes <- rec.Code
-		}(action)
+		}()
 	}
+	close(start)
 	wg.Wait()
 	close(codes)
 	ok := 0
@@ -570,4 +588,136 @@ func countOf(xs []string, x string) int {
 		}
 	}
 	return n
+}
+
+// The one-pending-request-per-user guarantee rests on this partial unique
+// index; assert it exists as shipped (concurrency tests can't prove it).
+func TestPendingIndexIsUniqueAndPartial(t *testing.T) {
+	_, db := newAppWithDB(t, nil)
+	var def string
+	db.Raw("SELECT indexdef FROM pg_indexes WHERE tablename = 'join_requests' AND indexname = 'idx_join_requests_pending'").Scan(&def)
+	if !strings.Contains(def, "UNIQUE") || !strings.Contains(def, "(wedding_id, user_id)") || !strings.Contains(def, "'pending'") {
+		t.Fatalf("idx_join_requests_pending must be UNIQUE (wedding_id, user_id) WHERE status = 'pending'; got %q", def)
+	}
+}
+
+// A decision waits for the row lock held by another decision, then finds the
+// request already decided (no double decision).
+func TestDecisionWaitsForRowLock(t *testing.T) {
+	e, db := newAppWithDB(t, nil)
+	sarah, sarahID := register(t, e, "sarah")
+	omar, _ := register(t, e, "omar")
+	wid := createWedding(t, e, sarah, "L&O")
+	rid := pendingRequest(t, e, sarah, wid, omar)
+	joins := repository.NewJoinRequestRepo(db)
+
+	tx := db.Begin()
+	if err := tx.Exec("SELECT 1 FROM join_requests WHERE id = ? FOR UPDATE", rid).Error; err != nil {
+		t.Fatalf("lock: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := joins.Decline(context.Background(), uuid.MustParse(wid), uuid.MustParse(rid), uuid.MustParse(sarahID))
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("decline didn't wait for the row lock (returned %v)", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+	// The lock holder decides first.
+	tx.Exec("UPDATE join_requests SET status = 'approved', decided_at = now() WHERE id = ?", rid)
+	tx.Commit()
+	if err := <-done; !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("decline after the request was decided: want ErrNotFound, got %v", err)
+	}
+}
+
+func TestDeclineCooldownExpires(t *testing.T) {
+	e, db := newAppWithDB(t, nil)
+	sarah, _ := register(t, e, "sarah")
+	omar, _ := register(t, e, "omar")
+	wid := createWedding(t, e, sarah, "L&O")
+	tok := editorLink(t, e, sarah, wid)
+	_, body := acceptLink(t, e, tok, omar)
+	rid, _ := dataOf(body)["request_id"].(string)
+	decideRequest(t, e, sarah, wid, rid, "decline", nil)
+
+	db.Exec("UPDATE join_requests SET decided_at = now() - interval '23 hours' WHERE id = ?", rid)
+	if code, _ := acceptLink(t, e, tok, omar); code != http.StatusConflict {
+		t.Fatalf("23h after a decline: want 409, got %d", code)
+	}
+	db.Exec("UPDATE join_requests SET decided_at = now() - interval '25 hours' WHERE id = ?", rid)
+	code, again := acceptLink(t, e, tok, omar)
+	if code != http.StatusAccepted || dataOf(again)["request_id"] == rid {
+		t.Fatalf("25h after a decline: want 202 with a new request, got %d %v", code, dataOf(again))
+	}
+	if s := requestStatus(t, db, rid); s != "declined" {
+		t.Fatalf("the old declined request must be kept for history, got %q", s)
+	}
+}
+
+func TestJoinRequestedNotificationCarriesRequestID(t *testing.T) {
+	e := newApp(t)
+	sarah, _ := register(t, e, "sarah")
+	omar, _ := register(t, e, "omar")
+	wid := createWedding(t, e, sarah, "L&O")
+	rid := pendingRequest(t, e, sarah, wid, omar)
+
+	_, body := do(t, e, http.MethodGet, "/api/v1/notifications", sarah, nil)
+	items, _ := dataOf(body)["items"].([]any)
+	for _, it := range items {
+		n, _ := it.(map[string]any)
+		if n["type"] != "join_requested" {
+			continue
+		}
+		data, _ := n["data"].(map[string]any)
+		if n["wedding_id"] != wid || data["request_id"] != rid {
+			t.Fatalf("join_requested notification: want wedding %s request %s, got %v", wid, rid, n)
+		}
+		return
+	}
+	t.Fatalf("owner has no join_requested notification: %v", items)
+}
+
+func TestJoinDecisionsAreAudited(t *testing.T) {
+	e, db := newAppWithDB(t, nil)
+	sarah, _ := register(t, e, "sarah")
+	omar, _ := register(t, e, "omar")
+	lina, _ := register(t, e, "lina")
+	wid := createWedding(t, e, sarah, "L&O")
+	decideRequest(t, e, sarah, wid, pendingRequest(t, e, sarah, wid, omar), "approve", nil)
+	decideRequest(t, e, sarah, wid, pendingRequest(t, e, sarah, wid, lina), "decline", nil)
+
+	for _, action := range []string{"join_request_approved", "join_request_declined"} {
+		var n int64
+		db.Raw("SELECT count(*) FROM audit_logs WHERE action = ?", action).Scan(&n)
+		if n != 1 {
+			t.Fatalf("audit %s: want 1 row, got %d", action, n)
+		}
+	}
+}
+
+func TestApproveRejectsBadInput(t *testing.T) {
+	e := newApp(t)
+	sarah, _ := register(t, e, "sarah")
+	omar, _ := register(t, e, "omar")
+	wid := createWedding(t, e, sarah, "L&O")
+	rid := pendingRequest(t, e, sarah, wid, omar)
+	base := "/api/v1/weddings/" + wid + "/join-requests/"
+
+	if code, _ := do(t, e, http.MethodPost, base+rid+"/approve", sarah, map[string]any{"role": "owner"}); code != http.StatusBadRequest {
+		t.Fatalf("approve as owner: want 400, got %d", code)
+	}
+	if code, _ := do(t, e, http.MethodPost, base+"not-a-uuid/approve", sarah, nil); code != http.StatusNotFound {
+		t.Fatalf("malformed request id: want 404, got %d", code)
+	}
+	req := newReq(http.MethodPost, base+rid+"/approve", sarah, nil)
+	req.Body = io.NopCloser(strings.NewReader("{not json"))
+	if rec := serve(e, req); rec.Code != http.StatusBadRequest {
+		t.Fatalf("malformed body: want 400, got %d", rec.Code)
+	}
+	if r := myRole(t, e, wid, omar); r != nil {
+		t.Fatalf("a rejected approval admitted the user: %v", r)
+	}
 }

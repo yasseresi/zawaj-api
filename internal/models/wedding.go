@@ -42,17 +42,6 @@ type Wedding struct {
 	OwnerID     uuid.UUID  `gorm:"type:uuid;index;not null" json:"owner_id"`
 }
 
-// MembershipCeiling is the owner's last decision about a (former) member,
-// kept after the membership is gone: MaxRole is the highest role invite links
-// may grant ("editor"/"viewer"), or "none" once the owner removed them.
-// Schema: migration 000010 (this model mirrors it for the test AutoMigrate).
-type MembershipCeiling struct {
-	WeddingID uuid.UUID `gorm:"type:uuid;primaryKey"`
-	UserID    uuid.UUID `gorm:"type:uuid;primaryKey"`
-	MaxRole   string    `gorm:"size:10;not null"`
-	SetAt     time.Time `gorm:"not null"`
-}
-
 // Membership links a user to a wedding with a role. Unique per (wedding,user).
 type Membership struct {
 	Base

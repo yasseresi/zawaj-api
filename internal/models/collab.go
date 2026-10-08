@@ -62,11 +62,11 @@ const (
 // the link grants, already capped by any earlier owner decision.
 type JoinRequest struct {
 	Base
-	WeddingID uuid.UUID         `gorm:"type:uuid;not null;uniqueIndex:idx_join_requests_pending,where:status = 'pending';index:idx_join_requests_wedding_status,priority:1" json:"wedding_id"`
-	UserID    uuid.UUID         `gorm:"type:uuid;not null;uniqueIndex:idx_join_requests_pending,where:status = 'pending';index:idx_join_requests_user" json:"user_id"`
+	WeddingID uuid.UUID         `gorm:"type:uuid;not null" json:"wedding_id"`
+	UserID    uuid.UUID         `gorm:"type:uuid;not null" json:"user_id"`
 	LinkID    uuid.UUID         `gorm:"type:uuid;not null" json:"link_id"`
 	Role      Role              `gorm:"size:10;not null" json:"role"`
-	Status    JoinRequestStatus `gorm:"size:10;not null;default:pending;index:idx_join_requests_wedding_status,priority:2" json:"status"`
+	Status    JoinRequestStatus `gorm:"size:10;not null;default:pending" json:"status"`
 	DecidedAt *time.Time        `json:"decided_at,omitempty"`
 	DecidedBy *uuid.UUID        `gorm:"type:uuid" json:"decided_by,omitempty"`
 }

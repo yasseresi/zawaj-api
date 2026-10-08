@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -73,8 +74,9 @@ func newTestApp(t *testing.T, pusher push.Sender) *testApp {
 	if sqlDB, err := db.DB(); err == nil {
 		t.Cleanup(func() { _ = sqlDB.Close() })
 	}
-	if err := database.Migrate(db); err != nil {
-		t.Fatalf("migrate: %v", err)
+	migrateOnce.Do(func() { migrateErr = resetSchema(db, dsn) })
+	if migrateErr != nil {
+		t.Fatalf("migrate: %v", migrateErr)
 	}
 	cleanDB(t, db)
 
@@ -114,10 +116,26 @@ func newTestApp(t *testing.T, pusher push.Sender) *testApp {
 	return &testApp{e: e, db: db, notif: notifSvc}
 }
 
+var (
+	migrateOnce sync.Once
+	migrateErr  error
+)
+
+// resetSchema rebuilds the test database from the production SQL migrations
+// (once per test process), so integration tests run against exactly the
+// schema that ships — indexes, partial indexes and constraints included —
+// rather than a GORM AutoMigrate approximation.
+func resetSchema(db *gorm.DB, dsn string) error {
+	if err := db.Exec("DROP SCHEMA public CASCADE; CREATE SCHEMA public;").Error; err != nil {
+		return err
+	}
+	return database.RunMigrations(dsn)
+}
+
 // cleanDB truncates all tables so each test starts from empty.
 func cleanDB(t *testing.T, db *gorm.DB) {
 	t.Helper()
-	err := db.Exec("TRUNCATE users, weddings, memberships, membership_ceilings, join_requests, invite_links, guests, guest_notes, activity_logs, notifications, device_tokens, refresh_tokens, idempotency_keys, audit_logs RESTART IDENTITY CASCADE").Error
+	err := db.Exec("TRUNCATE users, weddings, memberships, membership_ceilings, join_requests, wedding_invites, invite_links, guests, guest_notes, activity_logs, notifications, device_tokens, refresh_tokens, idempotency_keys, audit_logs RESTART IDENTITY CASCADE").Error
 	if err != nil {
 		t.Fatalf("truncate: %v", err)
 	}

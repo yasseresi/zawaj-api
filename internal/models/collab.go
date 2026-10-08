@@ -51,6 +51,10 @@ const (
 	JoinPending  JoinRequestStatus = "pending"
 	JoinApproved JoinRequestStatus = "approved"
 	JoinDeclined JoinRequestStatus = "declined"
+	// JoinClosed: no longer needs a decision (the user joined another way,
+	// was removed, or the link was revoked). Unlike declined, it doesn't
+	// start the re-request cooldown.
+	JoinClosed JoinRequestStatus = "closed"
 )
 
 // JoinRequest is created when someone accepts an invite link: they become a

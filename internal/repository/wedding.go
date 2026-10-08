@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // WeddingRepo is data access for weddings, memberships, and invite links.
@@ -133,22 +134,23 @@ func (r *WeddingRepo) ListMembers(ctx context.Context, weddingID uuid.UUID) ([]M
 	return out, err
 }
 
-// UpsertMembership creates or updates a user's membership+role on a wedding.
-// viaLinkID records the invite link used when this creates the membership
-// (nil for username invites); an existing membership keeps its original one.
+// UpsertMembership creates a user's membership on a wedding, or sets its role
+// if it exists, in one atomic statement (concurrent calls can't collide), and
+// closes the user's pending join requests for the wedding — they're a member
+// now — in the same transaction. viaLinkID records the invite link used when
+// this creates the membership (nil for username invites); an existing
+// membership keeps its original one.
 func (r *WeddingRepo) UpsertMembership(ctx context.Context, weddingID, userID uuid.UUID, role models.Role, viaLinkID *uuid.UUID) error {
-	var m models.Membership
-	err := r.db.WithContext(ctx).Where("wedding_id = ? AND user_id = ?", weddingID, userID).First(&m).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return r.db.WithContext(ctx).Create(&models.Membership{
-			WeddingID: weddingID, UserID: userID, Role: role, JoinedAt: time.Now(), ViaLinkID: viaLinkID,
-		}).Error
-	}
-	if err != nil {
-		return err
-	}
-	m.Role = role
-	return r.db.WithContext(ctx).Save(&m).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		m := &models.Membership{WeddingID: weddingID, UserID: userID, Role: role, JoinedAt: time.Now(), ViaLinkID: viaLinkID}
+		if err := tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "wedding_id"}, {Name: "user_id"}},
+			DoUpdates: clause.Assignments(map[string]any{"role": role, "updated_at": time.Now()}),
+		}).Create(m).Error; err != nil {
+			return err
+		}
+		return closePendingJoins(tx, weddingID, userID)
+	})
 }
 
 // SetMemberRole changes an existing member's role (owner decision), or
@@ -188,6 +190,9 @@ func (r *WeddingRepo) RemoveMember(ctx context.Context, weddingID, userID uuid.U
 		}
 		if !byOwner {
 			return nil
+		}
+		if err := closePendingJoins(tx, weddingID, userID); err != nil {
+			return err
 		}
 		if err := tx.Model(&models.WeddingInvite{}).
 			Where("wedding_id = ? AND invitee_id = ? AND status = ?", weddingID, userID, models.InvitePending).
@@ -229,6 +234,14 @@ func (r *WeddingRepo) GetCeiling(ctx context.Context, weddingID, userID uuid.UUI
 // owner username invite the user accepted).
 func (r *WeddingRepo) SetCeiling(ctx context.Context, weddingID, userID uuid.UUID, maxRole string) error {
 	return setCeiling(r.db.WithContext(ctx), weddingID, userID, maxRole)
+}
+
+// closePendingJoins closes a user's pending join requests for a wedding (they
+// joined another way or were removed, so there's nothing left to decide).
+func closePendingJoins(tx *gorm.DB, weddingID, userID uuid.UUID) error {
+	return tx.Model(&models.JoinRequest{}).
+		Where("wedding_id = ? AND user_id = ? AND status = ?", weddingID, userID, models.JoinPending).
+		Updates(map[string]any{"status": models.JoinClosed, "decided_at": time.Now()}).Error
 }
 
 func setCeiling(tx *gorm.DB, weddingID, userID uuid.UUID, maxRole string) error {

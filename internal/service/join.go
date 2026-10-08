@@ -137,16 +137,20 @@ func (s *JoinService) Approve(ctx context.Context, weddingID, requestID, ownerID
 		}
 		role = r
 	}
-	decided, created, err := s.joins.Approve(ctx, weddingID, requestID, ownerID, role)
+	decided, outcome, err := s.joins.Approve(ctx, weddingID, requestID, ownerID, role)
 	if errors.Is(err, repository.ErrNotFound) {
 		return nil, apperr.NotFound("join request not found")
 	}
 	if err != nil {
 		return nil, apperr.Internal("approve failed")
 	}
-	if created {
-		s.activity.Record(ctx, events.Activity{WeddingID: weddingID, ActorID: decided.UserID, Action: models.ActCollaboratorJoin})
+	switch outcome {
+	case repository.Removed:
+		return nil, apperr.RemovedFromWedding("this user was removed from the wedding; invite them by username to re-admit them")
+	case repository.AlreadyMember:
+		return decided, nil // nothing changed for them; no notification
 	}
+	s.activity.Record(ctx, events.Activity{WeddingID: weddingID, ActorID: decided.UserID, Action: models.ActCollaboratorJoin})
 	s.notifyRequester(ctx, weddingID, ownerID, decided.UserID, noteJoinApproved, "تمت الموافقة على طلب الانضمام")
 	return decided, nil
 }

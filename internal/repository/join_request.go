@@ -38,7 +38,7 @@ func (r *JoinRequestRepo) CreatePending(ctx context.Context, weddingID, userID, 
 	db := r.db.WithContext(ctx)
 	fresh := &models.JoinRequest{WeddingID: weddingID, UserID: userID, LinkID: linkID, Role: role, Status: models.JoinPending}
 	res := db.Clauses(clause.OnConflict{
-		Columns:     []clause.Column{{Name: "wedding_id"}, {Name: "user_id"}},
+		Columns: []clause.Column{{Name: "wedding_id"}, {Name: "user_id"}},
 		// Literal predicate, never a bind parameter: under a cached generic
 		// plan Postgres can't prove "status = $n" implies the partial index's
 		// "status = 'pending'" and rejects the ON CONFLICT target (42P10).
@@ -99,25 +99,50 @@ func (r *JoinRequestRepo) ListPending(ctx context.Context, weddingID uuid.UUID, 
 		Select("j.id, j.user_id, u.username, u.display_name, j.role, j.created_at").
 		Joins("JOIN users u ON u.id = j.user_id").
 		Where("j.wedding_id = ? AND j.status = ?", weddingID, models.JoinPending).
+		// Defensive: a member's leftover request has nothing to decide.
+		Where("NOT EXISTS (SELECT 1 FROM memberships m WHERE m.wedding_id = j.wedding_id AND m.user_id = j.user_id)").
 		Order("j.created_at ASC").
 		Limit(limit).
 		Scan(&out).Error
 	return out, err
 }
 
+// ApproveOutcome is what approving a request did.
+type ApproveOutcome int
+
+const (
+	// Approved: a membership was created at the approved role.
+	Approved ApproveOutcome = iota
+	// AlreadyMember: they joined some other way meanwhile; their membership is
+	// untouched and the request is closed.
+	AlreadyMember
+	// Removed: the owner removed them after they asked (ceiling "none"); no
+	// membership is created and the request is closed.
+	Removed
+)
+
 // Approve decides a pending request in one transaction: it locks the request
-// row, creates the membership at role (recording the link it came through),
-// records role as the member's ceiling (an owner decision), and marks the
-// request approved. ErrNotFound if the request isn't pending in this wedding.
-// If the user became a member some other way meanwhile, their membership is
-// left untouched and the request is still closed. The returned bool reports
-// whether a membership was created.
-func (r *JoinRequestRepo) Approve(ctx context.Context, weddingID, requestID, deciderID uuid.UUID, role models.Role) (*models.JoinRequest, bool, error) {
+// row, re-checks the owner's last decision about the user, creates the
+// membership at role (recording the link it came through), records role as
+// the member's ceiling (an owner decision), and marks the request approved.
+// ErrNotFound if the request isn't pending in this wedding. See
+// ApproveOutcome for the other cases; in those the request is closed (and
+// committed) rather than approved.
+func (r *JoinRequestRepo) Approve(ctx context.Context, weddingID, requestID, deciderID uuid.UUID, role models.Role) (*models.JoinRequest, ApproveOutcome, error) {
 	var req models.JoinRequest
-	created := false
+	outcome := Approved
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := lockPending(tx, weddingID, requestID, &req); err != nil {
 			return err
+		}
+		var ceiling string
+		if err := tx.Raw("SELECT max_role FROM membership_ceilings WHERE wedding_id = ? AND user_id = ?",
+			weddingID, req.UserID).Scan(&ceiling).Error; err != nil {
+			return err
+		}
+		if ceiling == CeilingRemoved {
+			outcome = Removed
+			return decide(tx, &req, models.JoinClosed, deciderID)
 		}
 		linkID := req.LinkID
 		res := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&models.Membership{
@@ -126,18 +151,20 @@ func (r *JoinRequestRepo) Approve(ctx context.Context, weddingID, requestID, dec
 		if res.Error != nil {
 			return res.Error
 		}
-		if created = res.RowsAffected == 1; created {
-			if err := setCeiling(tx, weddingID, req.UserID, string(role)); err != nil {
-				return err
-			}
+		if res.RowsAffected == 0 {
+			outcome = AlreadyMember
+			return decide(tx, &req, models.JoinClosed, deciderID)
+		}
+		if err := setCeiling(tx, weddingID, req.UserID, string(role)); err != nil {
+			return err
 		}
 		req.Role = role
 		return decide(tx, &req, models.JoinApproved, deciderID)
 	})
 	if err != nil {
-		return nil, false, err
+		return nil, Approved, err
 	}
-	return &req, created, nil
+	return &req, outcome, nil
 }
 
 // Decline marks a pending request declined. ErrNotFound if it isn't pending in

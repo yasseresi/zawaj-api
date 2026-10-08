@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // Joining through an invite link needs the owner's approval: the link stays
@@ -359,5 +360,119 @@ func TestRepeatedAcceptsOnOneConnection(t *testing.T) {
 		if code, body := acceptLink(t, e, tok, omar); code != http.StatusAccepted {
 			t.Fatalf("accept #%d: want 202, got %d %v", i, code, body)
 		}
+	}
+}
+
+// pendingRequest makes omar request to join through an editor link and
+// returns the request id.
+func pendingRequest(t *testing.T, e *gin.Engine, ownerTok, wid, userTok string) string {
+	t.Helper()
+	code, body := acceptLink(t, e, editorLink(t, e, ownerTok, wid), userTok)
+	if code != http.StatusAccepted {
+		t.Fatalf("join request: want 202, got %d %v", code, body)
+	}
+	rid, _ := dataOf(body)["request_id"].(string)
+	return rid
+}
+
+func requestStatus(t *testing.T, db *gorm.DB, rid string) string {
+	t.Helper()
+	var s string
+	db.Raw("SELECT status FROM join_requests WHERE id = ?", rid).Scan(&s)
+	return s
+}
+
+func TestUsernameInviteClosesPendingRequest(t *testing.T) {
+	e, db := newAppWithDB(t, nil)
+	sarah, _ := register(t, e, "sarah")
+	omar, _ := register(t, e, "omar")
+	wid := createWedding(t, e, sarah, "L&O")
+	rid := pendingRequest(t, e, sarah, wid, omar)
+
+	if code := acceptInvite(t, e, ownerInvite(t, e, sarah, wid, "omar", "viewer"), omar); code != http.StatusOK {
+		t.Fatalf("accept username invite: want 200, got %d", code)
+	}
+	if s := requestStatus(t, db, rid); s != "closed" {
+		t.Fatalf("join request after joining by username invite: want closed, got %q", s)
+	}
+	if _, reqs := joinRequests(t, e, sarah, wid); len(reqs) != 0 {
+		t.Fatalf("owner still sees a request from a member: %v", reqs)
+	}
+}
+
+func TestOwnerRemovalClosesPendingRequest(t *testing.T) {
+	e, db := newAppWithDB(t, nil)
+	sarah, _ := register(t, e, "sarah")
+	omar, omarID := register(t, e, "omar")
+	wid := createWedding(t, e, sarah, "L&O")
+	joinAs(t, e, sarah, wid, "viewer", omar)
+	// A request left pending while already a member (e.g. a race).
+	db.Exec(`INSERT INTO join_requests (id, created_at, updated_at, wedding_id, user_id, link_id, role, status)
+		VALUES (gen_random_uuid(), now(), now(), ?, ?, gen_random_uuid(), 'editor', 'pending')`, wid, omarID)
+
+	leave(t, e, wid, omarID, sarah)
+	var n int64
+	db.Raw("SELECT count(*) FROM join_requests WHERE wedding_id = ? AND user_id = ? AND status = 'pending'", wid, omarID).Scan(&n)
+	if n != 0 {
+		t.Fatalf("owner removal left %d pending request(s)", n)
+	}
+}
+
+func TestApproveRefusesRemovedUser(t *testing.T) {
+	e, db := newAppWithDB(t, nil)
+	sarah, _ := register(t, e, "sarah")
+	omar, omarID := register(t, e, "omar")
+	wid := createWedding(t, e, sarah, "L&O")
+	rid := pendingRequest(t, e, sarah, wid, omar)
+	// The owner removed omar after he asked (ceiling "none").
+	db.Exec(`INSERT INTO membership_ceilings (wedding_id, user_id, max_role, set_at) VALUES (?, ?, 'none', now())`, wid, omarID)
+
+	code, body := do(t, e, http.MethodPost, "/api/v1/weddings/"+wid+"/join-requests/"+rid+"/approve", sarah, nil)
+	if code != http.StatusForbidden || errCode(body) != "removed_from_wedding" {
+		t.Fatalf("approve a removed user's request: want 403 removed_from_wedding, got %d %v", code, errCode(body))
+	}
+	if r := myRole(t, e, wid, omar); r != nil {
+		t.Fatalf("removed user re-admitted by approval: %v", r)
+	}
+	if s := requestStatus(t, db, rid); s != "closed" {
+		t.Fatalf("refused request: want closed, got %q", s)
+	}
+}
+
+func TestApproveWhenAlreadyMemberClosesQuietly(t *testing.T) {
+	e, db := newAppWithDB(t, nil)
+	sarah, _ := register(t, e, "sarah")
+	omar, omarID := register(t, e, "omar")
+	wid := createWedding(t, e, sarah, "L&O")
+	rid := pendingRequest(t, e, sarah, wid, omar)
+	// omar became a viewer some other way while the request was pending.
+	db.Exec(`INSERT INTO memberships (id, created_at, updated_at, wedding_id, user_id, role, joined_at)
+		VALUES (gen_random_uuid(), now(), now(), ?, ?, 'viewer', now())`, wid, omarID)
+
+	if code := decideRequest(t, e, sarah, wid, rid, "approve", nil); code != http.StatusOK {
+		t.Fatalf("approve: want 200, got %d", code)
+	}
+	if r := myRole(t, e, wid, omar); r != "viewer" {
+		t.Fatalf("existing membership changed by approval: %v", r)
+	}
+	if s := requestStatus(t, db, rid); s != "closed" {
+		t.Fatalf("request for an existing member: want closed, got %q", s)
+	}
+	if contains(notificationTypes(t, e, omar), "join_approved") {
+		t.Fatalf("existing member was told their request was approved")
+	}
+}
+
+func TestPendingListHidesExistingMembers(t *testing.T) {
+	e, db := newAppWithDB(t, nil)
+	sarah, _ := register(t, e, "sarah")
+	omar, omarID := register(t, e, "omar")
+	wid := createWedding(t, e, sarah, "L&O")
+	pendingRequest(t, e, sarah, wid, omar)
+	db.Exec(`INSERT INTO memberships (id, created_at, updated_at, wedding_id, user_id, role, joined_at)
+		VALUES (gen_random_uuid(), now(), now(), ?, ?, 'viewer', now())`, wid, omarID)
+
+	if _, reqs := joinRequests(t, e, sarah, wid); len(reqs) != 0 {
+		t.Fatalf("owner list shows a request from a member: %v", reqs)
 	}
 }

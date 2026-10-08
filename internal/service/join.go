@@ -111,9 +111,9 @@ func (s *JoinService) RequestFromLink(ctx context.Context, tok string, userID uu
 	}
 	req := res.Request
 	if res.Created {
-		// One push per batch: if requests were already waiting, the owner
-		// already knows; store this one in-app without pushing again.
-		s.notifyOwner(ctx, w, userID, req.ID, !res.FirstInQueue)
+		// One push per batch: if requests were already waiting (recently),
+		// the owner already knows; store this one in-app without a push.
+		s.notifyOwner(ctx, w, userID, req.ID, !res.NotifyOwner)
 	}
 	id := req.ID
 	return &JoinResult{WeddingID: w.ID, WeddingName: w.Name, Role: req.Role, Status: JoinStatusPending, RequestID: &id}, nil

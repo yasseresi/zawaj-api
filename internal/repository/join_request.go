@@ -39,10 +39,15 @@ type PendingResult struct {
 	Request *models.JoinRequest
 	// Created: this call inserted the request (false: it was already pending).
 	Created bool
-	// FirstInQueue: the wedding had no other pending request, so the owner
-	// isn't already aware of one (used to batch owner pushes).
-	FirstInQueue bool
+	// NotifyOwner: push the owner about this request — the queue was empty,
+	// or its oldest request has waited over staleAfter (so an undrained queue
+	// still re-notifies about once a day). Otherwise the owner already knows.
+	NotifyOwner bool
 }
+
+// staleAfter is how long the oldest pending request may wait before a new
+// request pushes the owner again.
+const staleAfter = 24 * time.Hour
 
 // CreatePending records a pending request, or returns the one already pending
 // for (wedding, user) — repeated taps never create duplicates. At most
@@ -66,10 +71,16 @@ func (r *JoinRequestRepo) CreatePending(ctx context.Context, weddingID, userID, 
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
-		var pending int64
-		if err := pendingForWedding(tx, weddingID).Count(&pending).Error; err != nil {
+		var stats struct {
+			Pending int64
+			Oldest  *time.Time
+		}
+		if err := pendingForWedding(tx, weddingID).
+			Select("count(*) AS pending, min(join_requests.created_at) AS oldest").
+			Scan(&stats).Error; err != nil {
 			return err
 		}
+		pending := stats.Pending
 		if pending >= int64(maxPending) {
 			return ErrJoinQueueFull
 		}
@@ -85,7 +96,8 @@ func (r *JoinRequestRepo) CreatePending(ctx context.Context, weddingID, userID, 
 		if res.Error != nil {
 			return res.Error
 		}
-		out = PendingResult{Request: fresh, Created: res.RowsAffected == 1, FirstInQueue: pending == 0}
+		stale := stats.Oldest != nil && time.Since(*stats.Oldest) > staleAfter
+		out = PendingResult{Request: fresh, Created: res.RowsAffected == 1, NotifyOwner: pending == 0 || stale}
 		return nil
 	})
 	if err != nil {

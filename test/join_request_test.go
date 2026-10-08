@@ -721,3 +721,26 @@ func TestApproveRejectsBadInput(t *testing.T) {
 		t.Fatalf("a rejected approval admitted the user: %v", r)
 	}
 }
+
+// If requests have been waiting over a day, a new one pushes the owner again
+// (otherwise an undrained queue would never notify them again).
+func TestOwnerIsPushedAgainWhenTheQueueIsStale(t *testing.T) {
+	rec := &recordingSender{}
+	a := newTestApp(t, rec)
+	e := a.e
+	sarah, _ := register(t, e, "sarah")
+	omar, _ := register(t, e, "omar")
+	lina, _ := register(t, e, "lina")
+	wid := createWedding(t, e, sarah, "L&O")
+	do(t, e, http.MethodPost, "/api/v1/me/devices", sarah, map[string]any{"token": "sarah-device", "platform": "ios"})
+	tok := editorLink(t, e, sarah, wid)
+
+	_, ob := acceptLink(t, e, tok, omar)
+	omarReq, _ := dataOf(ob)["request_id"].(string)
+	a.db.Exec("UPDATE join_requests SET created_at = now() - interval '25 hours' WHERE id = ?", omarReq)
+	acceptLink(t, e, tok, lina)
+	a.notif.Wait()
+	if n := rec.count("join_requested"); n != 2 {
+		t.Fatalf("pushes with a request waiting >24h: want 2, got %d", n)
+	}
+}

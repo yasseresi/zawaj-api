@@ -96,7 +96,9 @@ func newTestApp(t *testing.T, pusher push.Sender) *testApp {
 	notifSvc := service.NewNotificationService(notifRepo, weddingRepo, deviceRepo, pusher, log)
 	guestSvc := service.NewGuestService(guestRepo, activitySvc, notifSvc)
 
-	t.Cleanup(notifSvc.Wait) // let async pushes finish before the pool closes
+	// Let async pushes finish before the pool closes.
+	t.Cleanup(notifSvc.Wait)
+
 	e := router.New(db, log, true, []string{"*"}, 0, 0, tokens, repository.NewIdempotencyRepo(db), // rate limiting disabled in tests
 		handler.NewAuth(service.NewAuthService(userRepo, repository.NewRefreshTokenRepo(db), tokens, 5, time.Minute), auditSvc, tokens),
 		handler.NewWedding(service.NewWeddingService(weddingRepo), auditSvc, weddingRepo, tokens),

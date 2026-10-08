@@ -12,6 +12,7 @@ import (
 	"zawaj/internal/repository"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 // A write that races an account deletion must not bring the user back: GORM's
@@ -91,21 +92,26 @@ func TestStaleUserWriteKeepsLock(t *testing.T) {
 // ChangePassword spends two bcrypt operations between loading the user and
 // writing it. A profile edit landing in that window must survive.
 func TestChangePasswordKeepsConcurrentProfileEdit(t *testing.T) {
-	e := newApp(t)
+	e, db := newAppWithDB(t, nil)
 	tok, _ := register(t, e, "sarah")
 
-	done := make(chan int)
+	// Hold the user row with an uncommitted profile edit, so ChangePassword
+	// reads the old row and then blocks on its write until we commit — the
+	// exact interleaving a whole-row write would get wrong, made deterministic.
+	edit := db.Begin()
+	if err := edit.Exec("UPDATE users SET display_name = 'Sara' WHERE username = 'sarah'").Error; err != nil {
+		t.Fatalf("profile edit: %v", err)
+	}
+	done := make(chan int, 1)
 	go func() {
 		code, _ := do(t, e, http.MethodPatch, "/api/v1/me/password", tok, map[string]any{
 			"old_password": "Password123!", "new_password": "NewPassword1!",
 		})
 		done <- code
 	}()
-	time.Sleep(20 * time.Millisecond) // let it load the user and start hashing
-	if code, _ := do(t, e, http.MethodPatch, "/api/v1/me", tok, map[string]any{
-		"display_name": "Sara",
-	}); code != http.StatusOK {
-		t.Fatalf("profile edit: want 200, got %d", code)
+	waitForLockWait(t, db)
+	if err := edit.Commit().Error; err != nil {
+		t.Fatalf("commit profile edit: %v", err)
 	}
 	if code := <-done; code != http.StatusOK {
 		t.Fatalf("change password: want 200, got %d", code)
@@ -118,6 +124,22 @@ func TestChangePasswordKeepsConcurrentProfileEdit(t *testing.T) {
 	if got := user["display_name"]; got != "Sara" {
 		t.Fatalf("display_name after overlapping writes: want Sara, got %v", got)
 	}
+}
+
+// waitForLockWait blocks until some session is waiting on a row lock (the
+// write we're holding up), failing after 10s.
+func waitForLockWait(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		var n int64
+		db.Raw("SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'").Scan(&n)
+		if n > 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("no session started waiting on the held row lock")
 }
 
 // Two preference toggles in flight at once (the app allows it) must both stick.

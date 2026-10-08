@@ -49,7 +49,8 @@ func (h *JoinRequest) Register(rg *gin.RouterGroup) {
 // @Description Existing members get 200 with their current role (status "member").
 // @Description Otherwise a join request is created (or the pending one returned) and the owner is notified: 202, status "pending".
 // @Description The role is the link's, capped by the owner's last decision; a user the owner removed gets 403 removed_from_wedding.
-// @Description A request declined less than 24h ago gets 409 join_request_declined.
+// @Description A request declined less than 24h ago gets 409 join_request_declined; a wedding with 50 pending requests gets 429 join_queue_full.
+// @Description The owner is pushed only when the queue was empty (later requests are stored in-app).
 // @Tags     invites
 // @Produce  json
 // @Security BearerAuth
@@ -58,7 +59,9 @@ func (h *JoinRequest) Register(rg *gin.RouterGroup) {
 // @Success  202 {object} response.Envelope{data=service.JoinResult} "join request pending"
 // @Failure  403 {object} response.Envelope{error=response.APIError} "removed_from_wedding"
 // @Failure  404 {object} response.Envelope{error=response.APIError}
+// @Failure  401 {object} response.Envelope{error=response.APIError}
 // @Failure  409 {object} response.Envelope{error=response.APIError} "join_request_declined"
+// @Failure  429 {object} response.Envelope{error=response.APIError} "join_queue_full"
 // @Router   /invite/{token}/accept [post]
 func (h *JoinRequest) accept(c *gin.Context) {
 	userID, _ := middleware.UserID(c)
@@ -97,6 +100,7 @@ func (h *JoinRequest) list(c *gin.Context) {
 // approve godoc
 // @Summary  Approve a join request (owner only)
 // @Description Creates the membership. The optional role may lower the requested role, never raise it.
+// @Description A user the owner removed meanwhile gets 403 removed_from_wedding (the request is closed); one who joined another way is closed quietly.
 // @Tags     members
 // @Accept   json
 // @Produce  json
@@ -106,7 +110,7 @@ func (h *JoinRequest) list(c *gin.Context) {
 // @Param    body body dto.ApproveJoinRequest false "Optional lower role"
 // @Success  200 {object} response.Envelope{data=models.JoinRequest}
 // @Failure  400 {object} response.Envelope{error=response.APIError}
-// @Failure  403 {object} response.Envelope{error=response.APIError}
+// @Failure  403 {object} response.Envelope{error=response.APIError} "not the owner, or removed_from_wedding"
 // @Failure  404 {object} response.Envelope{error=response.APIError} "not pending in this wedding"
 // @Router   /weddings/{id}/join-requests/{requestId}/approve [post]
 func (h *JoinRequest) approve(c *gin.Context) {

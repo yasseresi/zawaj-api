@@ -592,7 +592,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Existing members get 200 with their current role (status \"member\").\nOtherwise a join request is created (or the pending one returned) and the owner is notified: 202, status \"pending\".\nThe role is the link's, capped by the owner's last decision; a user the owner removed gets 403 removed_from_wedding.\nA request declined less than 24h ago gets 409 join_request_declined.",
+                "description": "Existing members get 200 with their current role (status \"member\").\nOtherwise a join request is created (or the pending one returned) and the owner is notified: 202, status \"pending\".\nThe role is the link's, capped by the owner's last decision; a user the owner removed gets 403 removed_from_wedding.\nA request declined less than 24h ago gets 409 join_request_declined; a wedding with 50 pending requests gets 429 join_queue_full.\nThe owner is pushed only when the queue was empty (later requests are stored in-app).",
                 "produces": [
                     "application/json"
                 ],
@@ -646,6 +646,24 @@ const docTemplate = `{
                             ]
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/zawaj_pkg_response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/zawaj_pkg_response.APIError"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
                     "403": {
                         "description": "removed_from_wedding",
                         "schema": {
@@ -684,6 +702,24 @@ const docTemplate = `{
                     },
                     "409": {
                         "description": "join_request_declined",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/zawaj_pkg_response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/zawaj_pkg_response.APIError"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "429": {
+                        "description": "join_queue_full",
                         "schema": {
                             "allOf": [
                                 {
@@ -3290,7 +3326,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Creates the membership. The optional role may lower the requested role, never raise it.",
+                "description": "Creates the membership. The optional role may lower the requested role, never raise it.\nA user the owner removed meanwhile gets 403 removed_from_wedding (the request is closed); one who joined another way is closed quietly.",
                 "consumes": [
                     "application/json"
                 ],
@@ -3363,7 +3399,7 @@ const docTemplate = `{
                         }
                     },
                     "403": {
-                        "description": "Forbidden",
+                        "description": "not the owner, or removed_from_wedding",
                         "schema": {
                             "allOf": [
                                 {
@@ -4400,12 +4436,14 @@ const docTemplate = `{
             "enum": [
                 "pending",
                 "approved",
-                "declined"
+                "declined",
+                "closed"
             ],
             "x-enum-varnames": [
                 "JoinPending",
                 "JoinApproved",
-                "JoinDeclined"
+                "JoinDeclined",
+                "JoinClosed"
             ]
         },
         "zawaj_internal_models.Role": {

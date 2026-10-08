@@ -172,6 +172,14 @@ membership**, never from the request body. All repository queries are scoped by 
     for history) and records the ceiling in one transaction. A declined user can't ask
     again for 24h (409 `join_request_declined`). Links are never revoked on a member's
     behalf. Username invites (owner picked the exact account) still join directly.
+  - **Abuse limits:** at most 50 pending requests per wedding (429 `join_queue_full`;
+    serialized per wedding by an advisory lock); the owner is pushed only when the queue
+    was empty (later requests are stored in-app silently); revoking a link closes the
+    requests made through it.
+  - **No stale requests:** a request is `closed` (no cooldown) when the user joins another
+    way (closed inside `UpsertMembership`'s transaction), is removed by the owner, or its
+    link is revoked; approval re-reads the ceiling under the row lock and refuses a user
+    the owner removed.
   - **Ceilings** (migration 000010) record the owner's last decision per (wedding, user),
     surviving the membership: role changes and approvals write the role, owner removals
     write `none`, and an accepted owner username invite newer than the decision writes

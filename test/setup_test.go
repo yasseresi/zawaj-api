@@ -5,11 +5,13 @@ package test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -128,11 +130,22 @@ var (
 // schema that ships — indexes, partial indexes and constraints included —
 // rather than a GORM AutoMigrate approximation.
 func resetSchema(db *gorm.DB, dsn string) error {
+	var name string
+	if err := db.Raw("SELECT current_database()").Scan(&name).Error; err != nil {
+		return err
+	}
+	if !isTestDatabase(name) {
+		return fmt.Errorf("refusing to reset schema of %q: TEST_DATABASE_URL must point at a database whose name ends in _test", name)
+	}
 	if err := db.Exec("DROP SCHEMA public CASCADE; CREATE SCHEMA public;").Error; err != nil {
 		return err
 	}
 	return database.RunMigrations(dsn)
 }
+
+// isTestDatabase guards the destructive schema reset: only databases named
+// *_test may be wiped, so a mis-set TEST_DATABASE_URL can't destroy real data.
+func isTestDatabase(name string) bool { return strings.HasSuffix(name, "_test") }
 
 // cleanDB truncates all tables so each test starts from empty.
 func cleanDB(t *testing.T, db *gorm.DB) {

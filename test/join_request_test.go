@@ -274,14 +274,21 @@ func TestParallelAcceptsCreateOneRequest(t *testing.T) {
 	tok := editorLink(t, e, sarah, wid)
 
 	var wg sync.WaitGroup
+	codes := make(chan int, 5)
 	for i := 0; i < 5; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			serve(e, newReq(http.MethodPost, "/api/v1/invite/"+tok+"/accept", omar, nil))
+			codes <- serve(e, newReq(http.MethodPost, "/api/v1/invite/"+tok+"/accept", omar, nil)).Code
 		}()
 	}
 	wg.Wait()
+	close(codes)
+	for c := range codes {
+		if c != http.StatusAccepted {
+			t.Fatalf("parallel accept: want every call 202, got %d", c)
+		}
+	}
 
 	if _, reqs := joinRequests(t, e, sarah, wid); len(reqs) != 1 {
 		t.Fatalf("parallel accepts: want 1 pending request, got %d", len(reqs))
@@ -329,5 +336,28 @@ func TestParallelDecisionsOnOneRequest(t *testing.T) {
 	}
 	if ok != 1 {
 		t.Fatalf("parallel approve+decline: want exactly one to win, got %d", ok)
+	}
+}
+
+// pgx caches prepared statements per connection, and after five runs Postgres
+// may switch to a generic plan. A bind-parameter predicate in the ON CONFLICT
+// target then no longer matches the partial unique index (SQLSTATE 42P10), so
+// repeated accepts on one connection must keep working.
+func TestRepeatedAcceptsOnOneConnection(t *testing.T) {
+	e, db := newAppWithDB(t, nil)
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+	sarah, _ := register(t, e, "sarah")
+	omar, _ := register(t, e, "omar")
+	wid := createWedding(t, e, sarah, "L&O")
+	tok := editorLink(t, e, sarah, wid)
+
+	for i := 1; i <= 10; i++ {
+		if code, body := acceptLink(t, e, tok, omar); code != http.StatusAccepted {
+			t.Fatalf("accept #%d: want 202, got %d %v", i, code, body)
+		}
 	}
 }

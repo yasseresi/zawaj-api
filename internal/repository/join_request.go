@@ -39,7 +39,10 @@ func (r *JoinRequestRepo) CreatePending(ctx context.Context, weddingID, userID, 
 	fresh := &models.JoinRequest{WeddingID: weddingID, UserID: userID, LinkID: linkID, Role: role, Status: models.JoinPending}
 	res := db.Clauses(clause.OnConflict{
 		Columns:     []clause.Column{{Name: "wedding_id"}, {Name: "user_id"}},
-		TargetWhere: clause.Where{Exprs: []clause.Expression{clause.Eq{Column: "status", Value: models.JoinPending}}},
+		// Literal predicate, never a bind parameter: under a cached generic
+		// plan Postgres can't prove "status = $n" implies the partial index's
+		// "status = 'pending'" and rejects the ON CONFLICT target (42P10).
+		TargetWhere: clause.Where{Exprs: []clause.Expression{clause.Expr{SQL: "status = 'pending'"}}},
 		DoNothing:   true,
 	}).Create(fresh)
 	if res.Error != nil {

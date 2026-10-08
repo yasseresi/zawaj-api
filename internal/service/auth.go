@@ -335,6 +335,8 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID uuid.UUID, req 
 	if err := s.users.UpdateColumns(ctx, userID, map[string]any{"password_hash": hash}); err != nil {
 		return userWriteErr(err, "change password failed")
 	}
+	// The current password was just proven, like a successful login.
+	_ = s.users.ClearFailures(ctx, userID)
 	// Invalidate existing sessions after a password change.
 	_ = s.refresh.RevokeAllForUser(ctx, userID)
 	return nil

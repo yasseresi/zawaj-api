@@ -3,6 +3,8 @@ package test
 import (
 	"net/http"
 	"testing"
+
+	"github.com/gin-gonic/gin"
 )
 
 func TestLoginLockout(t *testing.T) {
@@ -92,4 +94,60 @@ func TestChangePasswordLockout(t *testing.T) {
 	}); code != http.StatusLocked {
 		t.Fatalf("login after change-password lockout: want 423, got %d", code)
 	}
+}
+
+func wrongLogins(t *testing.T, e *gin.Engine, username string, n int) {
+	t.Helper()
+	for i := 0; i < n; i++ {
+		if code, _ := do(t, e, http.MethodPost, "/api/v1/auth/login", "", map[string]any{
+			"username": username, "password": "wrongpassword",
+		}); code != http.StatusUnauthorized {
+			t.Fatalf("wrong login %d: want 401, got %d", i+1, code)
+		}
+	}
+}
+
+// A successful login clears earlier failures, so they don't add up across
+// separate typos (harness maxAttempts=5).
+func TestSuccessfulLoginResetsFailureCount(t *testing.T) {
+	e := newApp(t)
+	register(t, e, "sarah")
+	wrongLogins(t, e, "sarah", 4)
+	if code, _ := do(t, e, http.MethodPost, "/api/v1/auth/login", "", map[string]any{
+		"username": "sarah", "password": "Password123!",
+	}); code != http.StatusOK {
+		t.Fatalf("correct login: want 200, got %d", code)
+	}
+	wrongLogins(t, e, "sarah", 4) // would lock on the 1st if the count carried over
+}
+
+// A lock lifts by itself once locked_until has passed.
+func TestLockoutExpires(t *testing.T) {
+	e, db := newAppWithDB(t, nil)
+	register(t, e, "sarah")
+	wrongLogins(t, e, "sarah", 5)
+	if code, _ := do(t, e, http.MethodPost, "/api/v1/auth/login", "", map[string]any{
+		"username": "sarah", "password": "Password123!",
+	}); code != http.StatusLocked {
+		t.Fatalf("while locked: want 423, got %d", code)
+	}
+	db.Exec("UPDATE users SET locked_until = now() - interval '1 second' WHERE username = 'sarah'")
+	if code, _ := do(t, e, http.MethodPost, "/api/v1/auth/login", "", map[string]any{
+		"username": "sarah", "password": "Password123!",
+	}); code != http.StatusOK {
+		t.Fatalf("after the lock expired: want 200, got %d", code)
+	}
+}
+
+// Proving the current password by changing it also clears earlier failures.
+func TestSuccessfulPasswordChangeResetsFailureCount(t *testing.T) {
+	e := newApp(t)
+	tok, _ := register(t, e, "sarah")
+	wrongLogins(t, e, "sarah", 4)
+	if code, _ := do(t, e, http.MethodPatch, "/api/v1/me/password", tok, map[string]any{
+		"old_password": "Password123!", "new_password": "NewPassword1!",
+	}); code != http.StatusOK {
+		t.Fatalf("change password: want 200, got %d", code)
+	}
+	wrongLogins(t, e, "sarah", 4)
 }

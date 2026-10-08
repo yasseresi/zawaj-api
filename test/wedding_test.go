@@ -1,8 +1,14 @@
 package test
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"testing"
+
+	"zawaj/internal/repository"
+
+	"github.com/google/uuid"
 )
 
 // Accepting a lower-role link must not downgrade an existing higher role.
@@ -184,5 +190,57 @@ func TestInviteLinkCannotUndoDemotion(t *testing.T) {
 	}
 	if r := myRole(t, e, wid, omar); r != "viewer" {
 		t.Fatalf("my_role after re-accept: want viewer, got %v", r)
+	}
+}
+
+// An owner's wedding edit that overlaps an ownership transfer must not write
+// the old owner_id back (only the edited columns may be written).
+func TestWeddingEditKeepsConcurrentOwnerChange(t *testing.T) {
+	e, db := newAppWithDB(t, nil)
+	sarah, _ := register(t, e, "sarah")
+	_, omarID := register(t, e, "omar")
+	wid := createWedding(t, e, sarah, "L&O")
+
+	transfer := db.Begin()
+	if err := transfer.Exec("UPDATE weddings SET owner_id = ? WHERE id = ?", omarID, wid).Error; err != nil {
+		t.Fatalf("hold wedding row: %v", err)
+	}
+	done := make(chan int, 1)
+	go func() {
+		code, _ := do(t, e, http.MethodPatch, "/api/v1/weddings/"+wid, sarah, map[string]any{"name": "Leila & Omar"})
+		done <- code
+	}()
+	waitForLockWait(t, db)
+	transfer.Commit()
+	if code := <-done; code != http.StatusOK {
+		t.Fatalf("edit: want 200, got %d", code)
+	}
+
+	var owner, name string
+	db.Raw("SELECT owner_id::text, name FROM weddings WHERE id = ?", wid).Row().Scan(&owner, &name)
+	if owner != omarID || name != "Leila & Omar" {
+		t.Fatalf("after overlapping edit+transfer: want owner %s name 'Leila & Omar', got %s %q", omarID, owner, name)
+	}
+}
+
+// Updating a wedding that was deleted meanwhile must not re-create it.
+func TestWeddingUpdateDoesNotResurrectDeletedWedding(t *testing.T) {
+	e, db := newAppWithDB(t, nil)
+	sarah, _ := register(t, e, "sarah")
+	wid := createWedding(t, e, sarah, "L&O")
+	weddings := repository.NewWeddingRepo(db)
+	id := uuid.MustParse(wid)
+	ctx := context.Background()
+
+	if err := weddings.Delete(ctx, id); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if err := weddings.UpdateColumns(ctx, id, map[string]any{"name": "stale"}); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("update of a deleted wedding: want ErrNotFound, got %v", err)
+	}
+	var n int64
+	db.Raw("SELECT count(*) FROM weddings WHERE id = ?", wid).Scan(&n)
+	if n != 0 {
+		t.Fatalf("deleted wedding was re-inserted")
 	}
 }

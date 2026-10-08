@@ -67,27 +67,30 @@ func (s *WeddingService) Get(ctx context.Context, weddingID uuid.UUID) (*models.
 
 // Update edits a wedding's fields.
 func (s *WeddingService) Update(ctx context.Context, weddingID uuid.UUID, req dto.UpdateWeddingRequest) (*models.Wedding, error) {
-	w, err := s.Get(ctx, weddingID)
-	if err != nil {
-		return nil, err
-	}
+	cols := map[string]any{}
 	if req.Name != nil {
-		w.Name = *req.Name
+		cols["name"] = *req.Name
 	}
 	if req.Description != nil {
-		w.Description = *req.Description
+		cols["description"] = *req.Description
 	}
 	if req.EventDate != nil {
 		date, perr := parseDate(req.EventDate)
 		if perr != nil {
 			return nil, apperr.Validation("invalid event_date")
 		}
-		w.EventDate = date
+		cols["event_date"] = date
 	}
-	if err := s.weddings.Update(ctx, w); err != nil {
+	// Only the edited columns are written, so a concurrent ownership
+	// transfer (owner_id) is never reverted; the response is re-read.
+	err := s.weddings.UpdateColumns(ctx, weddingID, cols)
+	if errors.Is(err, repository.ErrNotFound) {
+		return nil, apperr.NotFound("wedding not found")
+	}
+	if err != nil {
 		return nil, apperr.Internal("update wedding failed")
 	}
-	return w, nil
+	return s.Get(ctx, weddingID)
 }
 
 // Delete removes a wedding and its dependents.

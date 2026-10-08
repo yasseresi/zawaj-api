@@ -67,9 +67,22 @@ func (r *WeddingRepo) ByID(ctx context.Context, id uuid.UUID) (*models.Wedding, 
 	return &w, nil
 }
 
-// Update persists changes to a wedding.
-func (r *WeddingRepo) Update(ctx context.Context, w *models.Wedding) error {
-	return r.db.WithContext(ctx).Save(w).Error
+// UpdateColumns writes only the given columns of a wedding, or returns
+// ErrNotFound if it's gone. Naming just the edited columns means an edit can't
+// write back a stale owner_id (from a concurrent transfer), and a plain UPDATE
+// never falls back to INSERT, so it can't resurrect a deleted wedding.
+func (r *WeddingRepo) UpdateColumns(ctx context.Context, weddingID uuid.UUID, cols map[string]any) error {
+	if len(cols) == 0 {
+		return nil
+	}
+	res := r.db.WithContext(ctx).Model(&models.Wedding{}).Where("id = ?", weddingID).Updates(cols)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // Delete removes a wedding and its dependent rows (memberships, guests, notes,

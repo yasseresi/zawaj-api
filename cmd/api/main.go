@@ -153,6 +153,11 @@ func main() {
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Error("graceful shutdown failed", "error", err)
 	}
+	// Requests are drained; let their detached pushes finish (bounded by ctx,
+	// and before the DB closes: delivery reads device tokens).
+	if err := notifSvc.WaitContext(ctx); err != nil {
+		log.Warn("pending pushes not delivered before shutdown", "error", err)
+	}
 	if err := shutdownTracing(ctx); err != nil {
 		log.Error("tracing shutdown failed", "error", err)
 	}

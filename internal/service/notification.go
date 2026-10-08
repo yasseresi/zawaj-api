@@ -42,6 +42,22 @@ type NotificationService struct {
 // from the request that triggered them.
 func (s *NotificationService) Wait() { s.inflight.Wait() }
 
+// WaitContext is Wait bounded by ctx: it returns ctx.Err() if pushes are
+// still running at the deadline (graceful shutdown must not hang on FCM).
+func (s *NotificationService) WaitContext(ctx context.Context) error {
+	done := make(chan struct{})
+	go func() {
+		s.inflight.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // NewNotificationService builds the service. devices and pusher power FCM push;
 // pass a push.Noop when push is disabled.
 func NewNotificationService(notifs *repository.NotificationRepo, weddings *repository.WeddingRepo, devices *repository.DeviceTokenRepo, pusher push.Sender, log *slog.Logger) *NotificationService {

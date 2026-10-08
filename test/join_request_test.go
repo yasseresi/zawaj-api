@@ -476,3 +476,98 @@ func TestPendingListHidesExistingMembers(t *testing.T) {
 		t.Fatalf("owner list shows a request from a member: %v", reqs)
 	}
 }
+
+func TestRevokingLinkClosesItsPendingRequests(t *testing.T) {
+	e, db := newAppWithDB(t, nil)
+	sarah, _ := register(t, e, "sarah")
+	omar, _ := register(t, e, "omar")
+	lina, _ := register(t, e, "lina")
+	wid := createWedding(t, e, sarah, "L&O")
+	leakedID, leaked := newLink(t, e, sarah, wid, "editor")
+	_, other := newLink(t, e, sarah, wid, "editor")
+	_, ob := acceptLink(t, e, leaked, omar)
+	omarReq, _ := dataOf(ob)["request_id"].(string)
+	acceptLink(t, e, other, lina)
+
+	if code, _ := do(t, e, http.MethodDelete, "/api/v1/weddings/"+wid+"/invite-links/"+leakedID, sarah, nil); code != http.StatusOK {
+		t.Fatalf("revoke: want 200, got %d", code)
+	}
+	if s := requestStatus(t, db, omarReq); s != "closed" {
+		t.Fatalf("request through the revoked link: want closed, got %q", s)
+	}
+	_, reqs := joinRequests(t, e, sarah, wid)
+	if len(reqs) != 1 || reqs[0]["username"] != "lina" {
+		t.Fatalf("other links' requests must stay: %v", reqs)
+	}
+}
+
+func TestPendingRequestsAreCappedPerWedding(t *testing.T) {
+	e, db := newAppWithDB(t, nil)
+	sarah, _ := register(t, e, "sarah")
+	omar, _ := register(t, e, "omar")
+	lina, _ := register(t, e, "lina")
+	wid := createWedding(t, e, sarah, "L&O")
+	tok := editorLink(t, e, sarah, wid)
+	acceptLink(t, e, tok, omar) // omar is in the queue
+	// Fill the rest of the queue (cap 50) with other requesters.
+	for i := 0; i < 49; i++ {
+		db.Exec(`INSERT INTO join_requests (id, created_at, updated_at, wedding_id, user_id, link_id, role, status)
+			VALUES (gen_random_uuid(), now(), now(), ?, gen_random_uuid(), gen_random_uuid(), 'viewer', 'pending')`, wid)
+	}
+
+	code, body := acceptLink(t, e, tok, lina)
+	if code != http.StatusTooManyRequests || errCode(body) != "join_queue_full" {
+		t.Fatalf("51st requester: want 429 join_queue_full, got %d %v", code, errCode(body))
+	}
+	// Someone already queued still gets their request back.
+	if code, _ := acceptLink(t, e, tok, omar); code != http.StatusAccepted {
+		t.Fatalf("queued requester re-tapping: want 202, got %d", code)
+	}
+}
+
+func TestOwnerIsPushedOncePerBatchOfRequests(t *testing.T) {
+	rec := &recordingSender{}
+	a := newTestApp(t, rec)
+	e := a.e
+	sarah, _ := register(t, e, "sarah")
+	omar, _ := register(t, e, "omar")
+	lina, _ := register(t, e, "lina")
+	zed, _ := register(t, e, "zed")
+	wid := createWedding(t, e, sarah, "L&O")
+	if code, _ := do(t, e, http.MethodPost, "/api/v1/me/devices", sarah, map[string]any{"token": "sarah-device", "platform": "ios"}); code >= 300 {
+		t.Fatalf("register device: %d", code)
+	}
+	tok := editorLink(t, e, sarah, wid)
+
+	_, ob := acceptLink(t, e, tok, omar) // queue empty → push
+	acceptLink(t, e, tok, lina)          // queue not empty → stored, no push
+	a.notif.Wait()
+	if n := rec.count("join_requested"); n != 1 {
+		t.Fatalf("pushes for a batch of 2 requests: want 1, got %d", n)
+	}
+	if n := countOf(notificationTypes(t, e, sarah), "join_requested"); n != 2 {
+		t.Fatalf("in-app notifications: want 2, got %d", n)
+	}
+
+	// Once the owner has cleared the queue, the next request pushes again.
+	_, reqs := joinRequests(t, e, sarah, wid)
+	for _, r := range reqs {
+		decideRequest(t, e, sarah, wid, r["id"].(string), "decline", nil)
+	}
+	_ = ob
+	acceptLink(t, e, tok, zed)
+	a.notif.Wait()
+	if n := rec.count("join_requested"); n != 2 {
+		t.Fatalf("push after the queue emptied: want 2 total, got %d", n)
+	}
+}
+
+func countOf(xs []string, x string) int {
+	n := 0
+	for _, v := range xs {
+		if v == x {
+			n++
+		}
+	}
+	return n
+}

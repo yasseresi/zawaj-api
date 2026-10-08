@@ -322,15 +322,21 @@ func (r *WeddingRepo) LinkByToken(ctx context.Context, tok string) (*models.Invi
 }
 
 // RevokeLink marks a link revoked, scoped to its wedding, or ErrNotFound.
+// Pending join requests made through it are closed in the same transaction,
+// so revoking a leaked link also clears the requests it let in.
 func (r *WeddingRepo) RevokeLink(ctx context.Context, weddingID, linkID uuid.UUID) error {
-	res := r.db.WithContext(ctx).Model(&models.InviteLink{}).
-		Where("id = ? AND wedding_id = ?", linkID, weddingID).
-		Update("revoked", true)
-	if res.Error != nil {
-		return res.Error
-	}
-	if res.RowsAffected == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&models.InviteLink{}).
+			Where("id = ? AND wedding_id = ?", linkID, weddingID).
+			Update("revoked", true)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return ErrNotFound
+		}
+		return tx.Model(&models.JoinRequest{}).
+			Where("wedding_id = ? AND link_id = ? AND status = ?", weddingID, linkID, models.JoinPending).
+			Updates(map[string]any{"status": models.JoinClosed, "decided_at": time.Now()}).Error
+	})
 }

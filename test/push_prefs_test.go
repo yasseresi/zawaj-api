@@ -28,6 +28,19 @@ func (r *recordingSender) Send(_ context.Context, tokens []string, msg push.Mess
 	return nil
 }
 
+// count reports how many pushes of typ were sent.
+func (r *recordingSender) count(typ string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for _, p := range r.sent {
+		if p.typ == typ {
+			n++
+		}
+	}
+	return n
+}
+
 // waitFor polls until a push of typ arrives (push delivery is asynchronous).
 func (r *recordingSender) waitFor(typ string, d time.Duration) (sentPush, bool) {
 	deadline := time.Now().Add(d)

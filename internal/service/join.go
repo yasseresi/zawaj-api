@@ -21,6 +21,9 @@ const (
 	joinRequestCooldown = 24 * time.Hour
 	// maxPendingListed bounds the owner's review list.
 	maxPendingListed = 100
+	// maxPendingPerWedding caps the review queue, so link-holders creating
+	// accounts can't bury real requests or flood the owner.
+	maxPendingPerWedding = 50
 
 	noteJoinRequested = "join_requested"
 	noteJoinApproved  = "join_approved"
@@ -99,12 +102,18 @@ func (s *JoinService) RequestFromLink(ctx context.Context, tok string, userID uu
 		return nil, apperr.Internal("join failed")
 	}
 
-	req, created, err := s.joins.CreatePending(ctx, l.WeddingID, userID, l.ID, role)
+	res, err := s.joins.CreatePending(ctx, l.WeddingID, userID, l.ID, role, maxPendingPerWedding)
+	if errors.Is(err, repository.ErrJoinQueueFull) {
+		return nil, apperr.JoinQueueFull("this wedding has too many pending join requests; try again later")
+	}
 	if err != nil {
 		return nil, apperr.Internal("join failed")
 	}
-	if created {
-		s.notifyOwner(ctx, w, userID, req.ID)
+	req := res.Request
+	if res.Created {
+		// One push per batch: if requests were already waiting, the owner
+		// already knows; store this one in-app without pushing again.
+		s.notifyOwner(ctx, w, userID, req.ID, !res.FirstInQueue)
 	}
 	id := req.ID
 	return &JoinResult{WeddingID: w.ID, WeddingName: w.Name, Role: req.Role, Status: JoinStatusPending, RequestID: &id}, nil
@@ -195,7 +204,7 @@ func (s *JoinService) cappedRole(ctx context.Context, weddingID, userID uuid.UUI
 	return applyCeiling(c, role)
 }
 
-func (s *JoinService) notifyOwner(ctx context.Context, w *models.Wedding, requesterID, requestID uuid.UUID) {
+func (s *JoinService) notifyOwner(ctx context.Context, w *models.Wedding, requesterID, requestID uuid.UUID, silent bool) {
 	body := ""
 	if u, err := s.users.ByID(ctx, requesterID); err == nil {
 		body = fmt.Sprintf("%s (@%s)", u.DisplayName, u.Username)
@@ -208,6 +217,7 @@ func (s *JoinService) notifyOwner(ctx context.Context, w *models.Wedding, reques
 		Title:     "طلب انضمام جديد",
 		Body:      body,
 		Data:      data,
+		Silent:    silent,
 	})
 }
 

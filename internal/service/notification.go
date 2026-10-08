@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sync"
 	"time"
 
 	"zawaj/internal/apperr"
@@ -33,7 +34,13 @@ type NotificationService struct {
 	devices  *repository.DeviceTokenRepo
 	pusher   push.Sender
 	log      *slog.Logger
+	inflight sync.WaitGroup // detached push deliveries, for Wait
 }
+
+// Wait blocks until every push started so far has been delivered (or given
+// up). For graceful shutdown and deterministic tests; pushes stay detached
+// from the request that triggered them.
+func (s *NotificationService) Wait() { s.inflight.Wait() }
 
 // NewNotificationService builds the service. devices and pusher power FCM push;
 // pass a push.Noop when push is disabled.
@@ -75,7 +82,9 @@ func (s *NotificationService) Notify(ctx context.Context, n events.Note) {
 		return
 	}
 
-	s.pushToDevices(recipients, n)
+	if !n.Silent {
+		s.pushToDevices(recipients, n)
+	}
 }
 
 // NotifyUser delivers a single notification to one user (e.g. an invite to a
@@ -99,7 +108,9 @@ func (s *NotificationService) NotifyUser(ctx context.Context, userID uuid.UUID, 
 		s.log.Error("notify user: create notification failed", "error", err, "user_id", userID, "type", n.Type)
 		return
 	}
-	s.pushToDevices([]uuid.UUID{userID}, n)
+	if !n.Silent {
+		s.pushToDevices([]uuid.UUID{userID}, n)
+	}
 }
 
 // pushToDevices delivers a fan-out as FCM push to recipients who have push
@@ -109,7 +120,9 @@ func (s *NotificationService) pushToDevices(recipients []uuid.UUID, n events.Not
 	if s.pusher == nil || s.devices == nil || len(recipients) == 0 {
 		return
 	}
+	s.inflight.Add(1)
 	go func() {
+		defer s.inflight.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), pushTimeout)
 		defer cancel()
 

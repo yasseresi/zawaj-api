@@ -42,6 +42,9 @@ type Note struct {
 	Title     string
 	Body      string
 	Data      models.JSON
+	// Silent stores the in-app notification without a push (e.g. batching:
+	// the recipient was already pushed about the same thing).
+	Silent bool
 }
 
 // Notifier fans a notification out to the relevant recipients.

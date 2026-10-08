@@ -30,33 +30,76 @@ type JoinRequestView struct {
 	CreatedAt   time.Time   `json:"created_at"`
 }
 
+// ErrJoinQueueFull: the wedding already has the maximum number of pending
+// requests.
+var ErrJoinQueueFull = errors.New("join request queue full")
+
+// PendingResult is the outcome of CreatePending.
+type PendingResult struct {
+	Request *models.JoinRequest
+	// Created: this call inserted the request (false: it was already pending).
+	Created bool
+	// FirstInQueue: the wedding had no other pending request, so the owner
+	// isn't already aware of one (used to batch owner pushes).
+	FirstInQueue bool
+}
+
 // CreatePending records a pending request, or returns the one already pending
-// for (wedding, user) — repeated taps never create duplicates (enforced by the
-// partial unique index idx_join_requests_pending). created reports whether
-// this call inserted it.
-func (r *JoinRequestRepo) CreatePending(ctx context.Context, weddingID, userID, linkID uuid.UUID, role models.Role) (req *models.JoinRequest, created bool, err error) {
-	db := r.db.WithContext(ctx)
-	fresh := &models.JoinRequest{WeddingID: weddingID, UserID: userID, LinkID: linkID, Role: role, Status: models.JoinPending}
-	res := db.Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "wedding_id"}, {Name: "user_id"}},
-		// Literal predicate, never a bind parameter: under a cached generic
-		// plan Postgres can't prove "status = $n" implies the partial index's
-		// "status = 'pending'" and rejects the ON CONFLICT target (42P10).
-		TargetWhere: clause.Where{Exprs: []clause.Expression{clause.Expr{SQL: "status = 'pending'"}}},
-		DoNothing:   true,
-	}).Create(fresh)
-	if res.Error != nil {
-		return nil, false, res.Error
+// for (wedding, user) — repeated taps never create duplicates. At most
+// maxPending requests may be pending per wedding (ErrJoinQueueFull beyond
+// that, unless the user already has one). Requests for a wedding are
+// serialized by a transaction-scoped advisory lock so the cap holds under
+// concurrency; the partial unique index idx_join_requests_pending backs the
+// one-per-user rule.
+func (r *JoinRequestRepo) CreatePending(ctx context.Context, weddingID, userID, linkID uuid.UUID, role models.Role, maxPending int) (*PendingResult, error) {
+	var out PendingResult
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))", "join_requests:"+weddingID.String()).Error; err != nil {
+			return err
+		}
+		var existing models.JoinRequest
+		err := tx.Where("wedding_id = ? AND user_id = ? AND status = ?", weddingID, userID, models.JoinPending).First(&existing).Error
+		if err == nil {
+			out = PendingResult{Request: &existing}
+			return nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		var pending int64
+		if err := pendingForWedding(tx, weddingID).Count(&pending).Error; err != nil {
+			return err
+		}
+		if pending >= int64(maxPending) {
+			return ErrJoinQueueFull
+		}
+		fresh := &models.JoinRequest{WeddingID: weddingID, UserID: userID, LinkID: linkID, Role: role, Status: models.JoinPending}
+		res := tx.Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "wedding_id"}, {Name: "user_id"}},
+			// Literal predicate, never a bind parameter: under a cached generic
+			// plan Postgres can't prove "status = $n" implies the partial index's
+			// "status = 'pending'" and rejects the ON CONFLICT target (42P10).
+			TargetWhere: clause.Where{Exprs: []clause.Expression{clause.Expr{SQL: "status = 'pending'"}}},
+			DoNothing:   true,
+		}).Create(fresh)
+		if res.Error != nil {
+			return res.Error
+		}
+		out = PendingResult{Request: fresh, Created: res.RowsAffected == 1, FirstInQueue: pending == 0}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
-	if res.RowsAffected == 1 {
-		return fresh, true, nil
-	}
-	var pending models.JoinRequest
-	if err := db.Where("wedding_id = ? AND user_id = ? AND status = ?", weddingID, userID, models.JoinPending).
-		First(&pending).Error; err != nil {
-		return nil, false, err
-	}
-	return &pending, false, nil
+	return &out, nil
+}
+
+// pendingForWedding scopes to a wedding's pending requests from non-members
+// (a member's leftover request has nothing to decide).
+func pendingForWedding(tx *gorm.DB, weddingID uuid.UUID) *gorm.DB {
+	return tx.Model(&models.JoinRequest{}).
+		Where("join_requests.wedding_id = ? AND join_requests.status = ?", weddingID, models.JoinPending).
+		Where("NOT EXISTS (SELECT 1 FROM memberships m WHERE m.wedding_id = join_requests.wedding_id AND m.user_id = join_requests.user_id)")
 }
 
 // PendingByID returns a pending request of the wedding, or ErrNotFound.

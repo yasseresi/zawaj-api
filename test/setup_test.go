@@ -44,6 +44,22 @@ func newAppWithPusher(t *testing.T, pusher push.Sender) *gin.Engine {
 // tests that exercise repositories directly or inspect stored rows.
 func newAppWithDB(t *testing.T, pusher push.Sender) (*gin.Engine, *gorm.DB) {
 	t.Helper()
+	a := newTestApp(t, pusher)
+	return a.e, a.db
+}
+
+// testApp is the fully wired engine plus the handles tests reach into.
+type testApp struct {
+	e     *gin.Engine
+	db    *gorm.DB
+	notif *service.NotificationService // Wait() blocks until pushes are sent
+}
+
+// newTestApp builds the engine against a clean test database (skipping when
+// TEST_DATABASE_URL is unset) and closes its connection pool when the test
+// ends, so long runs don't exhaust Postgres connections.
+func newTestApp(t *testing.T, pusher push.Sender) *testApp {
+	t.Helper()
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("TEST_DATABASE_URL not set; skipping integration test")
@@ -53,6 +69,9 @@ func newAppWithDB(t *testing.T, pusher push.Sender) (*gin.Engine, *gorm.DB) {
 	db, err := database.New(dsn, true, database.PoolConfig{MaxOpenConns: 10, MaxIdleConns: 5, ConnMaxLifetime: time.Hour})
 	if err != nil {
 		t.Fatalf("connect test db: %v", err)
+	}
+	if sqlDB, err := db.DB(); err == nil {
+		t.Cleanup(func() { _ = sqlDB.Close() })
 	}
 	if err := database.Migrate(db); err != nil {
 		t.Fatalf("migrate: %v", err)
@@ -75,6 +94,7 @@ func newAppWithDB(t *testing.T, pusher push.Sender) (*gin.Engine, *gorm.DB) {
 	notifSvc := service.NewNotificationService(notifRepo, weddingRepo, deviceRepo, pusher, log)
 	guestSvc := service.NewGuestService(guestRepo, activitySvc, notifSvc)
 
+	t.Cleanup(notifSvc.Wait) // let async pushes finish before the pool closes
 	e := router.New(db, log, true, []string{"*"}, 0, 0, tokens, repository.NewIdempotencyRepo(db), // rate limiting disabled in tests
 		handler.NewAuth(service.NewAuthService(userRepo, repository.NewRefreshTokenRepo(db), tokens, 5, time.Minute), auditSvc, tokens),
 		handler.NewWedding(service.NewWeddingService(weddingRepo), auditSvc, weddingRepo, tokens),
@@ -91,7 +111,7 @@ func newAppWithDB(t *testing.T, pusher push.Sender) (*gin.Engine, *gorm.DB) {
 			service.NewJoinService(weddingRepo, repository.NewJoinRequestRepo(db), userRepo, activitySvc, notifSvc),
 			auditSvc, weddingRepo, tokens),
 	)
-	return e, db
+	return &testApp{e: e, db: db, notif: notifSvc}
 }
 
 // cleanDB truncates all tables so each test starts from empty.

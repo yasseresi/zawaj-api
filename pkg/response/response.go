@@ -24,6 +24,8 @@ const (
 	// CodeJoinRequestDeclined: the owner recently declined this user's join
 	// request; they can ask again after a cooldown.
 	CodeJoinRequestDeclined = "join_request_declined"
+	// CodeJoinQueueFull: the wedding has too many pending join requests.
+	CodeJoinQueueFull = "join_queue_full"
 )
 
 // Envelope is the single response shape for the whole API.

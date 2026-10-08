@@ -100,7 +100,8 @@ func (h *JoinRequest) list(c *gin.Context) {
 // approve godoc
 // @Summary  Approve a join request (owner only)
 // @Description Creates the membership. The optional role may lower the requested role, never raise it.
-// @Description A user the owner removed meanwhile gets 403 removed_from_wedding (the request is closed); one who joined another way is closed quietly.
+// @Description A user the owner removed meanwhile gets 403 removed_from_wedding; the request is still closed (state changed), so clients should refresh the list rather than treat the error as a no-op.
+// @Description A user who joined another way meanwhile: 200, request closed, no notification.
 // @Tags     members
 // @Accept   json
 // @Produce  json

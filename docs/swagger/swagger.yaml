@@ -2226,7 +2226,8 @@ paths:
       - application/json
       description: |-
         Creates the membership. The optional role may lower the requested role, never raise it.
-        A user the owner removed meanwhile gets 403 removed_from_wedding (the request is closed); one who joined another way is closed quietly.
+        A user the owner removed meanwhile gets 403 removed_from_wedding; the request is still closed (state changed), so clients should refresh the list rather than treat the error as a no-op.
+        A user who joined another way meanwhile: 200, request closed, no notification.
       parameters:
       - description: Wedding ID
         in: path

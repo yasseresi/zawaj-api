@@ -148,17 +148,22 @@ func main() {
 	<-quit
 	log.Info("shutdown signal received, draining")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil {
+	// Each step gets its own budget, so a slow HTTP drain can't leave the
+	// push wait or the trace flush an already-expired context.
+	step := func(d time.Duration, f func(context.Context) error) error {
+		ctx, cancel := context.WithTimeout(context.Background(), d)
+		defer cancel()
+		return f(ctx)
+	}
+	if err := step(10*time.Second, srv.Shutdown); err != nil {
 		log.Error("graceful shutdown failed", "error", err)
 	}
-	// Requests are drained; let their detached pushes finish (bounded by ctx,
-	// and before the DB closes: delivery reads device tokens).
-	if err := notifSvc.WaitContext(ctx); err != nil {
+	// Requests are drained; let their detached pushes finish (before the DB
+	// closes: delivery reads device tokens).
+	if err := step(5*time.Second, notifSvc.WaitContext); err != nil {
 		log.Warn("pending pushes not delivered before shutdown", "error", err)
 	}
-	if err := shutdownTracing(ctx); err != nil {
+	if err := step(3*time.Second, shutdownTracing); err != nil {
 		log.Error("tracing shutdown failed", "error", err)
 	}
 	if sqlDB, err := db.DB(); err == nil {

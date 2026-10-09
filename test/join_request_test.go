@@ -2,7 +2,9 @@ package test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -361,23 +363,33 @@ func TestParallelDecisionsOnOneRequest(t *testing.T) {
 // pgx caches prepared statements per connection, and after five runs Postgres
 // may switch to a generic plan. A bind-parameter predicate in the ON CONFLICT
 // target then no longer matches the partial unique index (SQLSTATE 42P10), so
-// repeated accepts on one connection must keep working.
+// repeated accepts on one connection must keep working. Each accept comes from
+// a different user so every call reaches the INSERT (a re-tap by the same user
+// returns the existing request before it).
 func TestRepeatedAcceptsOnOneConnection(t *testing.T) {
 	e, db := newAppWithDB(t, nil)
+	sarah, _ := register(t, e, "sarah")
+	wid := createWedding(t, e, sarah, "L&O")
+	tok := editorLink(t, e, sarah, wid)
+	users := make([]string, 10)
+	for i := range users {
+		users[i], _ = register(t, e, fmt.Sprintf("guest%d", i))
+	}
 	sqlDB, err := db.DB()
 	if err != nil {
 		t.Fatal(err)
 	}
 	sqlDB.SetMaxOpenConns(1)
-	sarah, _ := register(t, e, "sarah")
-	omar, _ := register(t, e, "omar")
-	wid := createWedding(t, e, sarah, "L&O")
-	tok := editorLink(t, e, sarah, wid)
 
-	for i := 1; i <= 10; i++ {
-		if code, body := acceptLink(t, e, tok, omar); code != http.StatusAccepted {
-			t.Fatalf("accept #%d: want 202, got %d %v", i, code, body)
+	for i, u := range users {
+		if code, body := acceptLink(t, e, tok, u); code != http.StatusAccepted {
+			t.Fatalf("accept #%d: want 202, got %d %v", i+1, code, body)
 		}
+	}
+	var n int64
+	db.Raw("SELECT count(*) FROM join_requests WHERE status = 'pending'").Scan(&n)
+	if n != int64(len(users)) {
+		t.Fatalf("want %d pending requests, got %d", len(users), n)
 	}
 }
 
@@ -540,6 +552,70 @@ func TestPendingRequestsAreCappedPerWedding(t *testing.T) {
 	// Someone already queued still gets their request back.
 	if code, _ := acceptLink(t, e, tok, omar); code != http.StatusAccepted {
 		t.Fatalf("queued requester re-tapping: want 202, got %d", code)
+	}
+}
+
+// The cap must hold when the last free slot is raced: CreatePending's advisory
+// lock serializes the count-then-insert, so exactly one racer gets the slot.
+// The window is narrow, so the race is repeated over several rounds.
+func TestParallelAcceptsRespectQueueCap(t *testing.T) {
+	e, db := newAppWithDB(t, nil)
+	sarah, _ := register(t, e, "sarah")
+	wid := createWedding(t, e, sarah, "L&O")
+	tok := editorLink(t, e, sarah, wid)
+	const workers, rounds = 10, 10
+	users := make([]string, workers)
+	for i := range users {
+		users[i], _ = register(t, e, fmt.Sprintf("racer%d", i))
+	}
+	// Leave exactly one free slot (cap 50).
+	for i := 0; i < 49; i++ {
+		db.Exec(`INSERT INTO join_requests (id, created_at, updated_at, wedding_id, user_id, link_id, role, status)
+			VALUES (gen_random_uuid(), now(), now(), ?, gen_random_uuid(), gen_random_uuid(), 'viewer', 'pending')`, wid)
+	}
+
+	type result struct {
+		code int
+		err  string
+	}
+	for round := 1; round <= rounds; round++ {
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		results := make(chan result, workers)
+		for _, u := range users {
+			wg.Add(1)
+			go func(u string) {
+				defer wg.Done()
+				<-start // release together so the count checks genuinely race
+				rec := serve(e, newReq(http.MethodPost, "/api/v1/invite/"+tok+"/accept", u, nil))
+				var body map[string]any
+				_ = json.Unmarshal(rec.Body.Bytes(), &body)
+				code, _ := errCode(body).(string)
+				results <- result{rec.Code, code}
+			}(u)
+		}
+		close(start)
+		wg.Wait()
+		close(results)
+
+		accepted := 0
+		for r := range results {
+			switch {
+			case r.code == http.StatusAccepted:
+				accepted++
+			case r.code == http.StatusTooManyRequests && r.err == "join_queue_full":
+			default:
+				t.Fatalf("round %d: unexpected %d %q", round, r.code, r.err)
+			}
+		}
+		var n int64
+		db.Raw("SELECT count(*) FROM join_requests WHERE wedding_id = ? AND status = 'pending'", wid).Scan(&n)
+		if accepted != 1 || n != 50 {
+			t.Fatalf("round %d racing for the last slot: want 1 accepted and 50 pending, got %d accepted, %d pending", round, accepted, n)
+		}
+		// Free the slot again: drop this round's winner.
+		db.Exec(`DELETE FROM join_requests WHERE wedding_id = ? AND status = 'pending'
+			AND user_id IN (SELECT id FROM users)`, wid)
 	}
 }
 

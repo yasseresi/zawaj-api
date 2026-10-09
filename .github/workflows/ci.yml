@@ -82,9 +82,10 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - uses: golangci/golangci-lint-action@v6
+      # v2 linter, built with a Go new enough for go.mod (v1.x stops at go1.24).
+      - uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          version: v2.14.0
           args: --timeout=5m
 
   security:
@@ -114,7 +115,7 @@ jobs:
 
       # Dependency + secret + IaC/Dockerfile misconfiguration scan of the tree.
       - name: Trivy filesystem scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scan-ref: .
@@ -134,7 +135,7 @@ jobs:
 
       # Scan the built runtime image for OS/package CVEs.
       - name: Trivy image scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: image
           image-ref: zawaj-api:ci

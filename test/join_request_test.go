@@ -879,3 +879,27 @@ func TestStaleQueueWithFreshTailIsRePushed(t *testing.T) {
 		t.Fatalf("stale head + fresh unpushed tail: want a re-push, got %d -> %d", before, n)
 	}
 }
+
+// When the request that pushed the owner is decided, the requests still
+// pending were never pushed, so the next arrival pushes again.
+func TestDecidingThePushedRequestLetsTheNextOnePush(t *testing.T) {
+	rec := &recordingSender{}
+	a := newTestApp(t, rec)
+	sarah, _ := register(t, a.e, "sarah")
+	wid := createWedding(t, a.e, sarah, "L&O")
+	do(t, a.e, http.MethodPost, "/api/v1/me/devices", sarah, map[string]any{"token": "sarah-device", "platform": "ios"})
+	tok := editorLink(t, a.e, sarah, wid)
+	user := func(name string) string { u, _ := register(t, a.e, name); return u }
+
+	_, fb := acceptLink(t, a.e, tok, user("first")) // pushed: queue was empty
+	first, _ := dataOf(fb)["request_id"].(string)
+	acceptLink(t, a.e, tok, user("second")) // in-app only
+	if c := decideRequest(t, a.e, sarah, wid, first, "decline", nil); c != http.StatusOK {
+		t.Fatalf("decline: want 200, got %d", c)
+	}
+	acceptLink(t, a.e, tok, user("third"))
+	a.notif.Wait()
+	if n := rec.count("join_requested"); n != 2 {
+		t.Fatalf("after deciding the pushed request: want 2 pushes, got %d", n)
+	}
+}

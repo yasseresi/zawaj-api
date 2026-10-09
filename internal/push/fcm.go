@@ -48,7 +48,7 @@ func (f *FCM) Send(ctx context.Context, tokens []string, msg Message) []string {
 		batch := tokens[start:end]
 
 		resp, err := f.client.SendEachForMulticast(ctx, &messaging.MulticastMessage{
-			Tokens: batch,
+			Tokens: batch, //nolint:staticcheck // SA1019: the app registers FCM registration tokens, not FIDs; migrate with the client.
 			Notification: &messaging.Notification{
 				Title: msg.Title,
 				Body:  msg.Body,

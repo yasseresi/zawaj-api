@@ -217,7 +217,9 @@ func TestWeddingEditKeepsConcurrentOwnerChange(t *testing.T) {
 	}
 
 	var owner, name string
-	db.Raw("SELECT owner_id::text, name FROM weddings WHERE id = ?", wid).Row().Scan(&owner, &name)
+	if err := db.Raw("SELECT owner_id::text, name FROM weddings WHERE id = ?", wid).Row().Scan(&owner, &name); err != nil {
+		t.Fatal(err)
+	}
 	if owner != omarID || name != "Leila & Omar" {
 		t.Fatalf("after overlapping edit+transfer: want owner %s name 'Leila & Omar', got %s %q", omarID, owner, name)
 	}

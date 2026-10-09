@@ -270,10 +270,3 @@ func parseDate(s *string) (*time.Time, error) {
 	}
 	return &t, nil
 }
-
-func name(w *models.Wedding) string {
-	if w == nil {
-		return ""
-	}
-	return w.Name
-}

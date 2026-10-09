@@ -3,7 +3,7 @@ package models
 import "testing"
 
 func TestRoleRankOrdering(t *testing.T) {
-	if !(RoleOwner.Rank() > RoleEditor.Rank() && RoleEditor.Rank() > RoleViewer.Rank()) {
+	if RoleOwner.Rank() <= RoleEditor.Rank() || RoleEditor.Rank() <= RoleViewer.Rank() {
 		t.Fatalf("rank order wrong: owner=%d editor=%d viewer=%d",
 			RoleOwner.Rank(), RoleEditor.Rank(), RoleViewer.Rank())
 	}

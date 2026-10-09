@@ -110,7 +110,7 @@ jobs:
       # Hard-coded secrets in code or git history.
       - name: gitleaks
         run: |
-          go install github.com/gitleaks/gitleaks/v8@latest
+          go install github.com/zricethezav/gitleaks/v8@v8.30.1
           gitleaks detect --source . --redact --no-banner --verbose --exit-code 1
 
       # Dependency + secret + IaC/Dockerfile misconfiguration scan of the tree.

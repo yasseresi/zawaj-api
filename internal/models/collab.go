@@ -27,6 +27,9 @@ const (
 	InvitePending  InviteStatus = "pending"
 	InviteAccepted InviteStatus = "accepted"
 	InviteDeclined InviteStatus = "declined"
+	// InviteRevoked: withdrawn because the owner removed the invitee from the
+	// wedding; a fresh invite is needed to re-admit them.
+	InviteRevoked InviteStatus = "revoked"
 )
 
 // WeddingInvite is a targeted invitation for a specific registered user to join
@@ -38,7 +41,36 @@ type WeddingInvite struct {
 	InviterID uuid.UUID    `gorm:"type:uuid;not null" json:"inviter_id"`
 	InviteeID uuid.UUID    `gorm:"type:uuid;not null;index" json:"invitee_id"`
 	Role      Role         `gorm:"size:10;not null" json:"role"`   // editor | viewer (never owner)
-	Status    InviteStatus `gorm:"size:10;not null" json:"status"` // pending | accepted | declined
+	Status    InviteStatus `gorm:"size:10;not null" json:"status"` // pending | accepted | declined | revoked
+}
+
+// JoinRequestStatus is the lifecycle of a request to join through an invite link.
+type JoinRequestStatus string
+
+const (
+	JoinPending  JoinRequestStatus = "pending"
+	JoinApproved JoinRequestStatus = "approved"
+	JoinDeclined JoinRequestStatus = "declined"
+	// JoinClosed: no longer needs a decision (the user joined another way,
+	// was removed, or the link was revoked). Unlike declined, it doesn't
+	// start the re-request cooldown.
+	JoinClosed JoinRequestStatus = "closed"
+)
+
+// JoinRequest is created when someone accepts an invite link: they become a
+// member only once the owner approves (schema: migration 000012). Role is what
+// the link grants, already capped by any earlier owner decision.
+type JoinRequest struct {
+	Base
+	WeddingID uuid.UUID         `gorm:"type:uuid;not null" json:"wedding_id"`
+	UserID    uuid.UUID         `gorm:"type:uuid;not null" json:"user_id"`
+	LinkID    uuid.UUID         `gorm:"type:uuid;not null" json:"link_id"`
+	Role      Role              `gorm:"size:10;not null" json:"role"`
+	Status    JoinRequestStatus `gorm:"size:10;not null;default:pending" json:"status"`
+	DecidedAt *time.Time        `json:"decided_at,omitempty"`
+	DecidedBy *uuid.UUID        `gorm:"type:uuid" json:"decided_by,omitempty"`
+	// OwnerNotified: creating this request pushed the owner.
+	OwnerNotified bool `gorm:"not null;default:false" json:"-"`
 }
 
 // ActivityAction enumerates entries in the activity feed / per-guest history.

@@ -36,6 +36,15 @@ func NewAuthService(users *repository.UserRepo, refresh *repository.RefreshToken
 	return &AuthService{users: users, refresh: refresh, tokens: tokens, maxAttempts: maxAttempts, lockout: lockout}
 }
 
+// userWriteErr maps a failed user write: the user vanished (deleted
+// concurrently) is a 404, anything else a 500 with msg.
+func userWriteErr(err error, msg string) *apperr.Error {
+	if errors.Is(err, repository.ErrNotFound) {
+		return apperr.NotFound("user not found")
+	}
+	return apperr.Internal(msg)
+}
+
 // issuePair issues an access+refresh pair and records the refresh token's jti so
 // it can be rotated/revoked later.
 func (s *AuthService) issuePair(ctx context.Context, userID uuid.UUID) (auth.TokenPair, error) {
@@ -132,9 +141,7 @@ func (s *AuthService) Login(ctx context.Context, req dto.LoginRequest) (*dto.Aut
 
 	// Success: clear any failure state.
 	if u.FailedAttempts != 0 || u.LockedUntil != nil {
-		u.FailedAttempts = 0
-		u.LockedUntil = nil
-		_ = s.users.Update(ctx, u)
+		_ = s.users.ClearFailures(ctx, u.ID)
 	}
 
 	pair, err := s.issuePair(ctx, u.ID)
@@ -145,19 +152,13 @@ func (s *AuthService) Login(ctx context.Context, req dto.LoginRequest) (*dto.Aut
 	return &dto.AuthResponse{User: &resp, Access: pair.Access, Refresh: pair.Refresh}, nil
 }
 
-// registerFailure increments the failed-attempt counter and locks the account
-// once it reaches maxAttempts.
+// registerFailure counts a failed credential check (atomically, in the
+// database) and locks the account once it reaches maxAttempts.
 func (s *AuthService) registerFailure(ctx context.Context, u *models.User) {
 	if s.maxAttempts <= 0 {
 		return
 	}
-	u.FailedAttempts++
-	if u.FailedAttempts >= s.maxAttempts {
-		until := time.Now().Add(s.lockout)
-		u.LockedUntil = &until
-		u.FailedAttempts = 0
-	}
-	_ = s.users.Update(ctx, u)
+	_ = s.users.RecordFailure(ctx, u.ID, s.maxAttempts, time.Now().Add(s.lockout))
 }
 
 // Refresh rotates a valid refresh token: it verifies the token, checks the
@@ -256,13 +257,12 @@ func (s *AuthService) Recover(ctx context.Context, req dto.RecoverRequest) (*dto
 	if err != nil {
 		return nil, apperr.Internal("recover failed")
 	}
-	u.PasswordHash = passwordHash
-	u.RecoveryHash = newCodeHash
-	u.FailedAttempts = 0
-	u.LockedUntil = nil
-	if err := s.users.Update(ctx, u); err != nil {
-		return nil, apperr.Internal("recover failed")
+	if err := s.users.UpdateColumns(ctx, u.ID, map[string]any{
+		"password_hash": passwordHash, "recovery_hash": newCodeHash,
+	}); err != nil {
+		return nil, userWriteErr(err, "recover failed")
 	}
+	_ = s.users.ClearFailures(ctx, u.ID)
 	// Password was reset — invalidate any existing sessions.
 	_ = s.refresh.RevokeAllForUser(ctx, u.ID)
 
@@ -273,9 +273,24 @@ func (s *AuthService) Recover(ctx context.Context, req dto.RecoverRequest) (*dto
 	return &dto.AuthResponse{Access: pair.Access, Refresh: pair.Refresh, RecoveryCode: newCode}, nil
 }
 
-// DeleteAccount hard-deletes the current user and cascade-deletes the weddings
-// they own.
-func (s *AuthService) DeleteAccount(ctx context.Context, userID uuid.UUID) error {
+// DeleteAccount permanently deletes the user and every wedding they own, after
+// re-verifying the current password. Wrong passwords count toward the login
+// lockout so this endpoint can't be used to brute-force the password.
+func (s *AuthService) DeleteAccount(ctx context.Context, userID uuid.UUID, password string) error {
+	if password == "" {
+		return apperr.Validation("password is required")
+	}
+	u, err := s.users.ByID(ctx, userID)
+	if err != nil {
+		return apperr.NotFound("user not found")
+	}
+	if u.LockedUntil != nil && u.LockedUntil.After(time.Now()) {
+		return apperr.Locked("account temporarily locked due to failed attempts")
+	}
+	if !auth.VerifySecret(u.PasswordHash, password) {
+		s.registerFailure(ctx, u)
+		return apperr.Unauthenticated("password is incorrect")
+	}
 	if err := s.users.DeleteWithOwnedData(ctx, userID); err != nil {
 		return apperr.Internal("delete account failed")
 	}
@@ -292,7 +307,9 @@ func (s *AuthService) Me(ctx context.Context, userID uuid.UUID) (*dto.UserRespon
 	return &resp, nil
 }
 
-// ChangePassword verifies the current password and sets a new one.
+// ChangePassword verifies the current password and sets a new one. Wrong
+// current passwords count toward the login lockout, so a stolen access token
+// can't be used to brute-force the password.
 func (s *AuthService) ChangePassword(ctx context.Context, userID uuid.UUID, req dto.ChangePasswordRequest) error {
 	if req.OldPassword == "" {
 		return apperr.Validation("current password is required")
@@ -304,60 +321,79 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID uuid.UUID, req 
 	if err != nil {
 		return apperr.NotFound("user not found")
 	}
+	if u.LockedUntil != nil && u.LockedUntil.After(time.Now()) {
+		return apperr.Locked("account temporarily locked due to failed attempts")
+	}
 	if !auth.VerifySecret(u.PasswordHash, req.OldPassword) {
+		s.registerFailure(ctx, u)
 		return apperr.Unauthenticated("current password is incorrect")
 	}
 	hash, err := auth.HashSecret(req.NewPassword)
 	if err != nil {
 		return apperr.Internal("change password failed")
 	}
-	u.PasswordHash = hash
-	if err := s.users.Update(ctx, u); err != nil {
-		return apperr.Internal("change password failed")
+	if err := s.users.UpdateColumns(ctx, userID, map[string]any{"password_hash": hash}); err != nil {
+		return userWriteErr(err, "change password failed")
 	}
+	// The current password was just proven, like a successful login.
+	_ = s.users.ClearFailures(ctx, userID)
 	// Invalidate existing sessions after a password change.
 	_ = s.refresh.RevokeAllForUser(ctx, userID)
 	return nil
 }
 
 // UpdateSettings applies preference changes and returns the updated user.
-func (s *AuthService) UpdateSettings(ctx context.Context, userID uuid.UUID, req dto.UpdateSettingsRequest) (*models.User, error) {
-	u, err := s.users.ByID(ctx, userID)
-	if err != nil {
-		return nil, apperr.NotFound("user not found")
-	}
+// Only the provided fields are written.
+func (s *AuthService) UpdateSettings(ctx context.Context, userID uuid.UUID, req dto.UpdateSettingsRequest) (*dto.UserResponse, error) {
+	cols := map[string]any{}
 	if req.Email != nil {
-		u.Email = req.Email
+		cols["email"] = *req.Email
 	}
 	if req.DarkMode != nil {
-		u.DarkMode = *req.DarkMode
+		cols["dark_mode"] = *req.DarkMode
 	}
 	if req.NotifPush != nil {
-		u.NotifPush = *req.NotifPush
+		cols["notif_push"] = *req.NotifPush
 	}
 	if req.NotifEmail != nil {
-		u.NotifEmail = *req.NotifEmail
+		cols["notif_email"] = *req.NotifEmail
 	}
 	if req.NotifRSVP != nil {
-		u.NotifRSVP = *req.NotifRSVP
+		cols["notif_rsvp"] = *req.NotifRSVP
 	}
-	if err := s.users.Update(ctx, u); err != nil {
-		return nil, apperr.Internal("update settings failed")
-	}
-	return u, nil
+	return s.writeAndReload(ctx, userID, cols, "update settings failed")
 }
 
-// UpdateMe edits the current user's profile.
+// UpdateMe edits the current user's profile. Only the provided fields are
+// written.
 func (s *AuthService) UpdateMe(ctx context.Context, userID uuid.UUID, req dto.UpdateMeRequest) (*dto.UserResponse, error) {
+	cols := map[string]any{}
+	if req.DisplayName != nil {
+		cols["display_name"] = *req.DisplayName
+	}
+	if req.Phone != nil {
+		if *req.Phone == "" {
+			cols["phone"] = nil
+		} else {
+			phone, err := validation.NormalizePhone(*req.Phone)
+			if err != nil {
+				return nil, apperr.Validation(err.Error())
+			}
+			cols["phone"] = phone
+		}
+	}
+	return s.writeAndReload(ctx, userID, cols, "update failed")
+}
+
+// writeAndReload writes cols and returns the user as stored afterwards, so the
+// response also reflects writes made concurrently by other requests.
+func (s *AuthService) writeAndReload(ctx context.Context, userID uuid.UUID, cols map[string]any, msg string) (*dto.UserResponse, error) {
+	if err := s.users.UpdateColumns(ctx, userID, cols); err != nil {
+		return nil, userWriteErr(err, msg)
+	}
 	u, err := s.users.ByID(ctx, userID)
 	if err != nil {
 		return nil, apperr.NotFound("user not found")
-	}
-	if req.DisplayName != nil {
-		u.DisplayName = *req.DisplayName
-	}
-	if err := s.users.Update(ctx, u); err != nil {
-		return nil, apperr.Internal("update failed")
 	}
 	resp := dto.NewUserResponse(u)
 	return &resp, nil

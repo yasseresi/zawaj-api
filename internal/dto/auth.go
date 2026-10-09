@@ -30,15 +30,22 @@ type RecoverRequest struct {
 	NewPassword  string `json:"new_password" binding:"required,min=8,max=72"`
 }
 
-// UpdateMeRequest edits the current user's profile.
+// UpdateMeRequest edits the current user's profile. Phone is normalized and
+// validated in the service (Algerian national format); "" clears it.
 type UpdateMeRequest struct {
 	DisplayName *string `json:"display_name" binding:"omitempty,max=80"`
+	Phone       *string `json:"phone" binding:"omitempty,max=20"`
 }
 
 // ChangePasswordRequest changes the password (settings screen).
 type ChangePasswordRequest struct {
 	OldPassword string `json:"old_password" binding:"required"`
 	NewPassword string `json:"new_password" binding:"required,min=8,max=72"`
+}
+
+// DeleteAccountRequest confirms account deletion with the current password.
+type DeleteAccountRequest struct {
+	Password string `json:"password" binding:"required"`
 }
 
 // UpdateSettingsRequest edits preferences (settings screen). All fields optional.
@@ -50,16 +57,24 @@ type UpdateSettingsRequest struct {
 	NotifRSVP  *bool   `json:"notif_rsvp"`
 }
 
-// UserResponse is the public view of a user.
+// UserResponse is the public view of a user, including the preferences the
+// settings screen reads back.
 type UserResponse struct {
-	ID          string `json:"id"`
-	Username    string `json:"username"`
-	DisplayName string `json:"display_name"`
+	ID          string  `json:"id"`
+	Username    string  `json:"username"`
+	DisplayName string  `json:"display_name"`
+	Phone       *string `json:"phone,omitempty"`
+	DarkMode    bool    `json:"dark_mode"`
+	NotifPush   bool    `json:"notif_push"`
+	NotifRSVP   bool    `json:"notif_rsvp"`
 }
 
 // NewUserResponse maps a model to its public view.
 func NewUserResponse(u *models.User) UserResponse {
-	return UserResponse{ID: u.ID.String(), Username: u.Username, DisplayName: u.DisplayName}
+	return UserResponse{
+		ID: u.ID.String(), Username: u.Username, DisplayName: u.DisplayName,
+		Phone: u.Phone, DarkMode: u.DarkMode, NotifPush: u.NotifPush, NotifRSVP: u.NotifRSVP,
+	}
 }
 
 // AuthResponse is returned on register/login/refresh/recover. RecoveryCode is

@@ -218,6 +218,7 @@ func (h *Auth) updateMe(c *gin.Context) {
 
 // changePassword godoc
 // @Summary  Change password
+// @Description Requires the current password. Wrong passwords count toward the login lockout.
 // @Tags     me
 // @Accept   json
 // @Produce  json
@@ -225,7 +226,8 @@ func (h *Auth) updateMe(c *gin.Context) {
 // @Param    body body dto.ChangePasswordRequest true "Old and new password"
 // @Success  200 {object} response.Envelope{data=object} "{ changed: true }"
 // @Failure  400 {object} response.Envelope{error=response.APIError}
-// @Failure  401 {object} response.Envelope{error=response.APIError}
+// @Failure  401 {object} response.Envelope{error=response.APIError} "missing token or wrong current password"
+// @Failure  423 {object} response.Envelope{error=response.APIError} "account locked after too many failed attempts"
 // @Router   /me/password [patch]
 func (h *Auth) changePassword(c *gin.Context) {
 	userID, _ := middleware.UserID(c)
@@ -245,15 +247,25 @@ func (h *Auth) changePassword(c *gin.Context) {
 // deleteMe godoc
 // @Summary  Delete account
 // @Description Permanently deletes the account and cascades all owned weddings and their data.
+// @Description Requires the current password. Wrong passwords count toward the login lockout.
 // @Tags     me
+// @Accept   json
 // @Produce  json
 // @Security BearerAuth
+// @Param    body body dto.DeleteAccountRequest true "Current password"
 // @Success  200 {object} response.Envelope{data=object} "{ deleted: true }"
-// @Failure  401 {object} response.Envelope{error=response.APIError}
+// @Failure  400 {object} response.Envelope{error=response.APIError}
+// @Failure  401 {object} response.Envelope{error=response.APIError} "missing token or wrong password"
+// @Failure  423 {object} response.Envelope{error=response.APIError} "locked after too many failed attempts"
 // @Router   /me [delete]
 func (h *Auth) deleteMe(c *gin.Context) {
 	userID, _ := middleware.UserID(c)
-	if err := h.svc.DeleteAccount(c.Request.Context(), userID); err != nil {
+	var req dto.DeleteAccountRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		apperr.Write(c, apperr.Validation(err.Error()))
+		return
+	}
+	if err := h.svc.DeleteAccount(c.Request.Context(), userID, req.Password); err != nil {
 		apperr.Write(c, err)
 		return
 	}
@@ -269,7 +281,7 @@ func (h *Auth) deleteMe(c *gin.Context) {
 // @Produce  json
 // @Security BearerAuth
 // @Param    body body dto.UpdateSettingsRequest true "Settings"
-// @Success  200 {object} response.Envelope{data=object}
+// @Success  200 {object} response.Envelope{data=dto.UserResponse}
 // @Failure  400 {object} response.Envelope{error=response.APIError}
 // @Failure  401 {object} response.Envelope{error=response.APIError}
 // @Router   /me/settings [patch]

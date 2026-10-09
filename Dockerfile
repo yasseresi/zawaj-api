@@ -1,5 +1,5 @@
 # --- build stage ---
-FROM golang:1.26.6-alpine AS build
+FROM golang:1.26.9-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -9,7 +9,9 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/api ./cmd/api
 
 # --- run stage ---
 FROM alpine:3.21
-RUN apk add --no-cache ca-certificates wget \
+# apk upgrade pulls patched base packages (e.g. openssl) newer than the image.
+RUN apk upgrade --no-cache \
+    && apk add --no-cache ca-certificates wget \
     && adduser -D -H -u 10001 app
 WORKDIR /app
 COPY --from=build /out/api /app/api

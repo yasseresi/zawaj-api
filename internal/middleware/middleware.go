@@ -32,6 +32,16 @@ func RequestID() gin.HandlerFunc {
 	}
 }
 
+// routeOf is the matched route template (e.g. /api/v1/invite/:token), never
+// the raw path: some paths carry bearer secrets (invite tokens) that must not
+// reach log storage. Unmatched requests log "unmatched".
+func routeOf(c *gin.Context) string {
+	if p := c.FullPath(); p != "" {
+		return p
+	}
+	return "unmatched"
+}
+
 // Logger emits one structured line per request after it completes.
 func Logger(log *slog.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -39,7 +49,7 @@ func Logger(log *slog.Logger) gin.HandlerFunc {
 		c.Next()
 		attrs := []any{
 			"method", c.Request.Method,
-			"path", c.Request.URL.Path,
+			"path", routeOf(c),
 			"status", c.Writer.Status(),
 			"duration_ms", time.Since(start).Milliseconds(),
 			"request_id", c.GetString(ctxRequestID),
@@ -59,7 +69,7 @@ func Recover(log *slog.Logger) gin.HandlerFunc {
 			if r := recover(); r != nil {
 				log.Error("panic recovered",
 					"error", r,
-					"path", c.Request.URL.Path,
+					"path", routeOf(c),
 					"request_id", c.GetString(ctxRequestID),
 				)
 				response.Error(c, 500, response.CodeInternal, "internal server error")

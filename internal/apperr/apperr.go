@@ -47,6 +47,15 @@ func AlreadyMember(msg string) *Error {
 func SelfInvite(msg string) *Error {
 	return New(http.StatusBadRequest, response.CodeSelfInvite, msg)
 }
+func RemovedFromWedding(msg string) *Error {
+	return New(http.StatusForbidden, response.CodeRemovedFromWedding, msg)
+}
+func JoinRequestDeclined(msg string) *Error {
+	return New(http.StatusConflict, response.CodeJoinRequestDeclined, msg)
+}
+func JoinQueueFull(msg string) *Error {
+	return New(http.StatusTooManyRequests, response.CodeJoinQueueFull, msg)
+}
 func Locked(msg string) *Error { return New(http.StatusLocked, response.CodeLocked, msg) }
 func RateLimited(msg string) *Error {
 	return New(http.StatusTooManyRequests, response.CodeRateLimited, msg)

@@ -1,8 +1,14 @@
 package test
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"testing"
+
+	"zawaj/internal/repository"
+
+	"github.com/google/uuid"
 )
 
 // Accepting a lower-role link must not downgrade an existing higher role.
@@ -60,13 +66,12 @@ func TestWeddingAndRoles(t *testing.T) {
 		t.Fatal("invite-link: empty token")
 	}
 
-	// Omar previews then accepts -> becomes editor.
+	// Omar previews, requests to join, and the owner approves -> editor.
 	if code, _ := do(t, e, http.MethodGet, "/api/v1/invite/"+tok, omar, nil); code != http.StatusOK {
 		t.Fatalf("preview: want 200, got %d", code)
 	}
-	_, ab := do(t, e, http.MethodPost, "/api/v1/invite/"+tok+"/accept", omar, nil)
-	if dataOf(ab)["role"] != "editor" {
-		t.Fatalf("accept: want role editor, got %v", dataOf(ab)["role"])
+	if role := joinViaLink(t, e, sarah, wid, tok, omar); role != "editor" {
+		t.Fatalf("join: want role editor, got %v", role)
 	}
 
 	// Role enforcement matrix.
@@ -163,5 +168,81 @@ func TestDeviceRegistration(t *testing.T) {
 	}
 	if code, _ := do(t, e, "POST", "/api/v1/me/devices", "", map[string]any{"token": "y", "platform": "web"}); code != http.StatusUnauthorized {
 		t.Fatalf("unauth register: want 401, got %d", code)
+	}
+}
+
+// Owner role decisions stick: re-opening the editor link they joined with
+// never changes a demoted member's role. Links only ever lead to a request for
+// non-members; an existing member keeps their role.
+func TestInviteLinkCannotUndoDemotion(t *testing.T) {
+	e := newApp(t)
+	sarah, _ := register(t, e, "sarah")
+	omar, omarID := register(t, e, "omar")
+	wid := createWedding(t, e, sarah, "L&O")
+	tok := editorLink(t, e, sarah, wid)
+
+	joinViaLink(t, e, sarah, wid, tok, omar)
+	setRole(t, e, sarah, wid, omarID, "viewer")
+
+	code, ab := acceptLink(t, e, tok, omar)
+	if code != http.StatusOK || dataOf(ab)["status"] != "member" || dataOf(ab)["role"] != "viewer" {
+		t.Fatalf("re-accept as a demoted member: want 200 member viewer, got %d %v", code, dataOf(ab))
+	}
+	if r := myRole(t, e, wid, omar); r != "viewer" {
+		t.Fatalf("my_role after re-accept: want viewer, got %v", r)
+	}
+}
+
+// An owner's wedding edit that overlaps an ownership transfer must not write
+// the old owner_id back (only the edited columns may be written).
+func TestWeddingEditKeepsConcurrentOwnerChange(t *testing.T) {
+	e, db := newAppWithDB(t, nil)
+	sarah, _ := register(t, e, "sarah")
+	_, omarID := register(t, e, "omar")
+	wid := createWedding(t, e, sarah, "L&O")
+
+	transfer := db.Begin()
+	if err := transfer.Exec("UPDATE weddings SET owner_id = ? WHERE id = ?", omarID, wid).Error; err != nil {
+		t.Fatalf("hold wedding row: %v", err)
+	}
+	done := make(chan int, 1)
+	go func() {
+		code, _ := do(t, e, http.MethodPatch, "/api/v1/weddings/"+wid, sarah, map[string]any{"name": "Leila & Omar"})
+		done <- code
+	}()
+	waitForLockWait(t, db)
+	transfer.Commit()
+	if code := <-done; code != http.StatusOK {
+		t.Fatalf("edit: want 200, got %d", code)
+	}
+
+	var owner, name string
+	if err := db.Raw("SELECT owner_id::text, name FROM weddings WHERE id = ?", wid).Row().Scan(&owner, &name); err != nil {
+		t.Fatal(err)
+	}
+	if owner != omarID || name != "Leila & Omar" {
+		t.Fatalf("after overlapping edit+transfer: want owner %s name 'Leila & Omar', got %s %q", omarID, owner, name)
+	}
+}
+
+// Updating a wedding that was deleted meanwhile must not re-create it.
+func TestWeddingUpdateDoesNotResurrectDeletedWedding(t *testing.T) {
+	e, db := newAppWithDB(t, nil)
+	sarah, _ := register(t, e, "sarah")
+	wid := createWedding(t, e, sarah, "L&O")
+	weddings := repository.NewWeddingRepo(db)
+	id := uuid.MustParse(wid)
+	ctx := context.Background()
+
+	if err := weddings.Delete(ctx, id); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if err := weddings.UpdateColumns(ctx, id, map[string]any{"name": "stale"}); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("update of a deleted wedding: want ErrNotFound, got %v", err)
+	}
+	var n int64
+	db.Raw("SELECT count(*) FROM weddings WHERE id = ?", wid).Scan(&n)
+	if n != 0 {
+		t.Fatalf("deleted wedding was re-inserted")
 	}
 }

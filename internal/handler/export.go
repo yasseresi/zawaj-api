@@ -79,7 +79,7 @@ func (h *Export) guestsCSV(c *gin.Context) {
 	c.Header("Content-Disposition", `attachment; filename="guests.csv"`)
 
 	// UTF-8 BOM: makes Excel detect the encoding and show Arabic correctly.
-	c.Writer.Write([]byte{0xEF, 0xBB, 0xBF})
+	_, _ = c.Writer.Write([]byte{0xEF, 0xBB, 0xBF})
 
 	w := csv.NewWriter(c.Writer)
 	defer w.Flush()
@@ -239,10 +239,11 @@ func drawPDFGuestTable(pdf *fpdf.Fpdf, guests []models.Guest, language string) {
 		count := strconv.Itoa(guestCount(guest))
 
 		status := ""
-		if guest.Status == models.StatusConfirmed {
+		switch guest.Status {
+		case models.StatusConfirmed:
 			status = "✓"
 			pdf.SetTextColor(40, 125, 65)
-		} else if guest.Status == models.StatusDeclined {
+		case models.StatusDeclined:
 			status = "✕"
 			pdf.SetTextColor(180, 55, 50)
 		}

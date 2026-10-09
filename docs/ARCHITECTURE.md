@@ -89,6 +89,10 @@ destructive prod changes.
 - Harder: query-plan visibility → enable GORM SQL logging in dev; index `wedding_id`,
   `username`, `share_code`.
 - **Action:** AutoMigrate for dev only; introduce golang-migrate before first real users.
+- **Update (2026-10-08):** done — production and the integration tests both build the
+  schema from the versioned SQL migrations (`database.RunMigrations`; the test harness
+  resets `zawaj_test` and migrates once per run). AutoMigrate is gone entirely, so tests
+  can't drift from the shipped schema.
 
 ---
 
@@ -104,6 +108,10 @@ kill adoption. Still need a per-user secret — username-only lets anyone impers
 Register with **username (unique) + password (min 8)**. Server bcrypt-hashes the password,
 generates a random **recovery code** returned **once** in plaintext (bcrypt hash stored).
 Recovery code is the *only* account-reset path. Rate-limit + lockout on login/recover.
+
+**Amendment (2026-10-06):** users may add an optional, **unverified** Algerian phone number
+(national format, e.g. `0672859965`) as a profile contact field. It is never an auth or
+recovery factor, so this decision is unchanged. The legacy `email` column is no longer exposed.
 
 ### Options
 | Option | Friction | Security | Reset path |
@@ -153,6 +161,36 @@ membership**, never from the request body. All repository queries are scoped by 
 - Harder: must remember to attach the middleware to every wedding route — mitigated by
   grouping all wedding routes under one Gin router group that carries the guard.
 - **Action:** integration tests assert 404 for non-member and 403 for viewer-writes on every route.
+- **Addendum (2026-10-07/08) — joining by link needs the owner's approval.** Invite
+  links are long-lived bearer tokens shared in group chats, and accounts are free, so no
+  amount of link revocation can keep out someone who holds a live link (they re-register),
+  and revoking a shared link to stop one person breaks it for everyone.
+  - **Join requests** (migration 000012): accepting a link never creates a membership. It
+    creates a pending `join_requests` row (one per wedding+user, partial unique index) and
+    notifies the owner; the owner approves (optionally at a lower role) or declines.
+    Approval locks the row, creates the membership (`via_link_id`, migration 000011, kept
+    for history) and records the ceiling in one transaction. A declined user can't ask
+    again for 24h (409 `join_request_declined`). Links are never revoked on a member's
+    behalf. Username invites (owner picked the exact account) still join directly.
+  - **Abuse limits:** at most 50 pending requests per wedding (429 `join_queue_full`;
+    serialized per wedding by an advisory lock); the owner is pushed when the queue was
+    empty, or when no pending request has pushed them in the last 24h (tracked by
+    `join_requests.owner_notified`, migration 000013), so an undrained queue re-pushes at
+    most about once a day; other requests are stored in-app silently. Deciding the request
+    that pushed resets the clock (the next arrival pushes, so at most one push per owner
+    action), and right after migration 000013 each non-empty queue pushes once. Revoking a link
+    closes the requests made through it.
+  - **No stale requests:** a request is `closed` (no cooldown) when the user joins another
+    way (closed inside `UpsertMembership`'s transaction), is removed by the owner, or its
+    link is revoked; approval re-reads the ceiling under the row lock and refuses a user
+    the owner removed.
+  - **Ceilings** (migration 000010) record the owner's last decision per (wedding, user),
+    surviving the membership: role changes and approvals write the role, owner removals
+    write `none`, and an accepted owner username invite newer than the decision writes
+    its outcome. A join request asks for `min(link role, ceiling)`; `none` is refused up
+    front (403 `removed_from_wedding`). Self-leave writes nothing. An owner removal also
+    withdraws the user's pending username invites.
+  - Tests: `test/join_request_test.go`, `test/ceiling_test.go`.
 
 ---
 

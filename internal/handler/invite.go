@@ -90,12 +90,13 @@ func (h *Invite) listMine(c *gin.Context) {
 
 // accept godoc
 // @Summary  Accept an invite
-// @Description Grants the caller membership per the invite's role.
+// @Description Grants the caller membership per the invite's role. An invite sent after the owner demoted/removed the user supersedes that decision; an older one is capped by it (403 removed_from_wedding if removed).
 // @Tags     invites
 // @Produce  json
 // @Security BearerAuth
 // @Param    inviteId path string true "Invite ID"
 // @Success  200 {object} response.Envelope
+// @Failure  403 {object} response.Envelope{error=response.APIError} "removed_from_wedding"
 // @Failure  404 {object} response.Envelope{error=response.APIError}
 // @Router   /invites/{inviteId}/accept [post]
 func (h *Invite) accept(c *gin.Context) {

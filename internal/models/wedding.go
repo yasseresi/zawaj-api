@@ -49,4 +49,7 @@ type Membership struct {
 	UserID    uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_membership_wedding_user;index" json:"user_id"`
 	Role      Role      `gorm:"size:10;not null" json:"role"`
 	JoinedAt  time.Time `json:"joined_at"`
+	// ViaLinkID is the invite link they joined with (nil for owners and
+	// username invites), kept for history (migration 000011).
+	ViaLinkID *uuid.UUID `gorm:"type:uuid" json:"-"`
 }

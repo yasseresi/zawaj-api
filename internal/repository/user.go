@@ -5,6 +5,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
 
 	"zawaj/internal/models"
 
@@ -60,9 +61,41 @@ func (r *UserRepo) ExistsByUsername(ctx context.Context, username string) (bool,
 	return count > 0, err
 }
 
-// Update persists changes to an existing user.
-func (r *UserRepo) Update(ctx context.Context, u *models.User) error {
-	return r.db.WithContext(ctx).Save(u).Error
+// UpdateColumns writes only the given columns of an existing user, or returns
+// ErrNotFound if the row is gone. Callers name exactly the columns they
+// changed, so overlapping writes (two toggles, a profile edit during a
+// password change) can't revert each other, and an UPDATE never falls back to
+// INSERT, so a write racing an account deletion can't resurrect the user.
+// Lockout state has its own atomic writers (RecordFailure / ClearFailures).
+func (r *UserRepo) UpdateColumns(ctx context.Context, userID uuid.UUID, cols map[string]any) error {
+	if len(cols) == 0 {
+		return nil
+	}
+	res := r.db.WithContext(ctx).Model(&models.User{}).Where("id = ?", userID).Updates(cols)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// RecordFailure atomically counts one failed credential check. The attempt
+// that reaches maxAttempts locks the account until lockedUntil and resets the
+// counter. A single UPDATE (row-locked by Postgres) means parallel guesses
+// can't lose increments.
+func (r *UserRepo) RecordFailure(ctx context.Context, userID uuid.UUID, maxAttempts int, lockedUntil time.Time) error {
+	return r.db.WithContext(ctx).Exec(`UPDATE users SET
+		locked_until    = CASE WHEN failed_attempts + 1 >= ? THEN ? ELSE locked_until END,
+		failed_attempts = CASE WHEN failed_attempts + 1 >= ? THEN 0 ELSE failed_attempts + 1 END
+		WHERE id = ?`, maxAttempts, lockedUntil, maxAttempts, userID).Error
+}
+
+// ClearFailures resets the failed-attempt counter and lifts any lock.
+func (r *UserRepo) ClearFailures(ctx context.Context, userID uuid.UUID) error {
+	return r.db.WithContext(ctx).Exec(
+		"UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE id = ?", userID).Error
 }
 
 // DeleteWithOwnedData hard-deletes a user and cascade-deletes every wedding they
@@ -78,8 +111,12 @@ func (r *UserRepo) DeleteWithOwnedData(ctx context.Context, userID uuid.UUID) er
 		"DELETE FROM activity_logs WHERE wedding_id IN (" + owned + ")",
 		"DELETE FROM invite_links WHERE wedding_id IN (" + owned + ")",
 		"DELETE FROM memberships WHERE wedding_id IN (" + owned + ")",
+		"DELETE FROM membership_ceilings WHERE wedding_id IN (" + owned + ")",
+		"DELETE FROM join_requests WHERE wedding_id IN (" + owned + ")",
 		"DELETE FROM weddings WHERE owner_id = ?",
 		"DELETE FROM memberships WHERE user_id = ?",
+		"DELETE FROM membership_ceilings WHERE user_id = ?",
+		"DELETE FROM join_requests WHERE user_id = ?",
 		"DELETE FROM notifications WHERE user_id = ?",
 		"DELETE FROM device_tokens WHERE user_id = ?",
 		"DELETE FROM refresh_tokens WHERE user_id = ?",

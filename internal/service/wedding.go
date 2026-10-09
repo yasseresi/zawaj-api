@@ -67,27 +67,30 @@ func (s *WeddingService) Get(ctx context.Context, weddingID uuid.UUID) (*models.
 
 // Update edits a wedding's fields.
 func (s *WeddingService) Update(ctx context.Context, weddingID uuid.UUID, req dto.UpdateWeddingRequest) (*models.Wedding, error) {
-	w, err := s.Get(ctx, weddingID)
-	if err != nil {
-		return nil, err
-	}
+	cols := map[string]any{}
 	if req.Name != nil {
-		w.Name = *req.Name
+		cols["name"] = *req.Name
 	}
 	if req.Description != nil {
-		w.Description = *req.Description
+		cols["description"] = *req.Description
 	}
 	if req.EventDate != nil {
 		date, perr := parseDate(req.EventDate)
 		if perr != nil {
 			return nil, apperr.Validation("invalid event_date")
 		}
-		w.EventDate = date
+		cols["event_date"] = date
 	}
-	if err := s.weddings.Update(ctx, w); err != nil {
+	// Only the edited columns are written, so a concurrent ownership
+	// transfer (owner_id) is never reverted; the response is re-read.
+	err := s.weddings.UpdateColumns(ctx, weddingID, cols)
+	if errors.Is(err, repository.ErrNotFound) {
+		return nil, apperr.NotFound("wedding not found")
+	}
+	if err != nil {
 		return nil, apperr.Internal("update wedding failed")
 	}
-	return w, nil
+	return s.Get(ctx, weddingID)
 }
 
 // Delete removes a wedding and its dependents.
@@ -147,7 +150,7 @@ type InvitePreview struct {
 
 // PreviewInvite resolves a token to the wedding + role it grants.
 func (s *WeddingService) PreviewInvite(ctx context.Context, tok string) (*InvitePreview, error) {
-	l, err := s.validLink(ctx, tok)
+	l, err := validLink(ctx, s.weddings, tok)
 	if err != nil {
 		return nil, err
 	}
@@ -158,32 +161,20 @@ func (s *WeddingService) PreviewInvite(ctx context.Context, tok string) (*Invite
 	return &InvitePreview{WeddingID: w.ID, WeddingName: w.Name, Role: l.Role}, nil
 }
 
-// AcceptInvite joins the caller to the wedding with the link's role. Idempotent;
-// never downgrades an existing owner.
-func (s *WeddingService) AcceptInvite(ctx context.Context, tok string, userID uuid.UUID) (*InvitePreview, error) {
-	l, err := s.validLink(ctx, tok)
-	if err != nil {
-		return nil, err
+// applyCeiling caps role at the ceiling c (shared by link and username invites).
+func applyCeiling(c *repository.Ceiling, role models.Role) (models.Role, error) {
+	if c.MaxRole == repository.CeilingRemoved {
+		return "", apperr.RemovedFromWedding("you were removed from this wedding; ask the owner to invite you again")
 	}
-	// Never downgrade an existing membership: if the caller already holds a role
-	// at least as high as the link's, keep it (owner accepting a viewer link, an
-	// editor re-opening a viewer link, etc.).
-	if existing, gerr := s.weddings.GetRole(ctx, l.WeddingID, userID); gerr == nil && existing.Rank() >= l.Role.Rank() {
-		w, _ := s.weddings.ByID(ctx, l.WeddingID)
-		return &InvitePreview{WeddingID: l.WeddingID, WeddingName: name(w), Role: existing}, nil
+	if max := models.Role(c.MaxRole); max.Rank() < role.Rank() {
+		return max, nil
 	}
-	if err := s.weddings.UpsertMembership(ctx, l.WeddingID, userID, l.Role); err != nil {
-		return nil, apperr.Internal("join failed")
-	}
-	w, err := s.weddings.ByID(ctx, l.WeddingID)
-	if err != nil {
-		return nil, apperr.Internal("join failed")
-	}
-	return &InvitePreview{WeddingID: w.ID, WeddingName: w.Name, Role: l.Role}, nil
+	return role, nil
 }
 
-func (s *WeddingService) validLink(ctx context.Context, tok string) (*models.InviteLink, error) {
-	l, err := s.weddings.LinkByToken(ctx, tok)
+// validLink resolves an invite token to a live (not revoked, not expired) link.
+func validLink(ctx context.Context, weddings *repository.WeddingRepo, tok string) (*models.InviteLink, error) {
+	l, err := weddings.LinkByToken(ctx, tok)
 	if errors.Is(err, repository.ErrNotFound) {
 		return nil, apperr.NotFound("invite not found")
 	}
@@ -233,9 +224,10 @@ func (s *WeddingService) SetMemberRole(ctx context.Context, weddingID, targetID 
 	return nil
 }
 
-// RemoveMember removes a collaborator (owner action) or lets a member leave.
-// The owner cannot be removed or leave (must transfer ownership first — later).
-func (s *WeddingService) RemoveMember(ctx context.Context, weddingID, targetID uuid.UUID) error {
+// RemoveMember removes a collaborator (owner action, byOwner) or lets a member
+// leave. An owner removal is remembered so invite links can't re-admit them.
+// The owner cannot be removed or leave (must transfer ownership first).
+func (s *WeddingService) RemoveMember(ctx context.Context, weddingID, targetID uuid.UUID, byOwner bool) error {
 	cur, err := s.weddings.GetRole(ctx, weddingID, targetID)
 	if errors.Is(err, repository.ErrNotFound) {
 		return apperr.NotFound("member not found")
@@ -246,7 +238,7 @@ func (s *WeddingService) RemoveMember(ctx context.Context, weddingID, targetID u
 	if cur == models.RoleOwner {
 		return apperr.Forbidden("the owner cannot be removed")
 	}
-	if err := s.weddings.RemoveMember(ctx, weddingID, targetID); err != nil {
+	if err := s.weddings.RemoveMember(ctx, weddingID, targetID, byOwner); err != nil {
 		return apperr.Internal("remove member failed")
 	}
 	return nil
@@ -277,11 +269,4 @@ func parseDate(s *string) (*time.Time, error) {
 		return nil, err
 	}
 	return &t, nil
-}
-
-func name(w *models.Wedding) string {
-	if w == nil {
-		return ""
-	}
-	return w.Name
 }

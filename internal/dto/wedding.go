@@ -26,6 +26,12 @@ type InviteUserRequest struct {
 	Role     string `json:"role" binding:"required,oneof=editor viewer"`
 }
 
+// ApproveJoinRequest approves a join request; Role (optional) may lower the
+// role the invite link grants, never raise it.
+type ApproveJoinRequest struct {
+	Role string `json:"role" binding:"omitempty,oneof=editor viewer"`
+}
+
 // SetRoleRequest changes a member's role.
 type SetRoleRequest struct {
 	Role string `json:"role" binding:"required,oneof=editor viewer"`

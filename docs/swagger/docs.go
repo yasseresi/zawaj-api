@@ -592,14 +592,14 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Joins the wedding at the link's role; never downgrades an existing higher role.",
+                "description": "Existing members get 200 with their current role (status \"member\").\nOtherwise a join request is created (or the pending one returned) and the owner is notified: 202, status \"pending\".\nThe role is the link's, capped by the owner's last decision; a user the owner removed gets 403 removed_from_wedding.\nA request declined less than 24h ago gets 409 join_request_declined; a wedding with 50 pending requests gets 429 join_queue_full.\nThe owner is pushed only when the queue was empty (later requests are stored in-app).",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "invites"
                 ],
-                "summary": "Accept an invite",
+                "summary": "Accept an invite link (request to join)",
                 "parameters": [
                     {
                         "type": "string",
@@ -611,9 +611,75 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "OK",
+                        "description": "already a member",
                         "schema": {
-                            "$ref": "#/definitions/zawaj_pkg_response.Envelope"
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/zawaj_pkg_response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/zawaj_internal_service.JoinResult"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "202": {
+                        "description": "join request pending",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/zawaj_pkg_response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/zawaj_internal_service.JoinResult"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/zawaj_pkg_response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/zawaj_pkg_response.APIError"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "removed_from_wedding",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/zawaj_pkg_response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/zawaj_pkg_response.APIError"
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     },
                     "404": {
@@ -635,7 +701,25 @@ const docTemplate = `{
                         }
                     },
                     "409": {
-                        "description": "Conflict",
+                        "description": "join_request_declined",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/zawaj_pkg_response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/zawaj_pkg_response.APIError"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "429": {
+                        "description": "join_queue_full",
                         "schema": {
                             "allOf": [
                                 {
@@ -686,7 +770,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Grants the caller membership per the invite's role.",
+                "description": "Grants the caller membership per the invite's role. An invite sent after the owner demoted/removed the user supersedes that decision; an older one is capped by it (403 removed_from_wedding if removed).",
                 "produces": [
                     "application/json"
                 ],
@@ -708,6 +792,24 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/zawaj_pkg_response.Envelope"
+                        }
+                    },
+                    "403": {
+                        "description": "removed_from_wedding",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/zawaj_pkg_response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/zawaj_pkg_response.APIError"
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     },
                     "404": {
@@ -873,7 +975,10 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Permanently deletes the account and cascades all owned weddings and their data.",
+                "description": "Permanently deletes the account and cascades all owned weddings and their data.\nRequires the current password. Wrong passwords count toward the login lockout.",
+                "consumes": [
+                    "application/json"
+                ],
                 "produces": [
                     "application/json"
                 ],
@@ -881,6 +986,17 @@ const docTemplate = `{
                     "me"
                 ],
                 "summary": "Delete account",
+                "parameters": [
+                    {
+                        "description": "Current password",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/zawaj_internal_dto.DeleteAccountRequest"
+                        }
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "{ deleted: true }",
@@ -900,8 +1016,44 @@ const docTemplate = `{
                             ]
                         }
                     },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/zawaj_pkg_response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/zawaj_pkg_response.APIError"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
                     "401": {
-                        "description": "Unauthorized",
+                        "description": "missing token or wrong password",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/zawaj_pkg_response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/zawaj_pkg_response.APIError"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "423": {
+                        "description": "locked after too many failed attempts",
                         "schema": {
                             "allOf": [
                                 {
@@ -1202,6 +1354,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Requires the current password. Wrong passwords count toward the login lockout.",
                 "consumes": [
                     "application/json"
                 ],
@@ -1261,7 +1414,25 @@ const docTemplate = `{
                         }
                     },
                     "401": {
-                        "description": "Unauthorized",
+                        "description": "missing token or wrong current password",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/zawaj_pkg_response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/zawaj_pkg_response.APIError"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "423": {
+                        "description": "account locked after too many failed attempts",
                         "schema": {
                             "allOf": [
                                 {
@@ -1321,7 +1492,7 @@ const docTemplate = `{
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "type": "object"
+                                            "$ref": "#/definitions/zawaj_internal_dto.UserResponse"
                                         }
                                     }
                                 }
@@ -3066,6 +3237,295 @@ const docTemplate = `{
                 }
             }
         },
+        "/weddings/{id}/join-requests": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Oldest first, at most 100.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "members"
+                ],
+                "summary": "List pending join requests (owner only)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Wedding ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "{ items: JoinRequestView[] }",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/zawaj_pkg_response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/zawaj_pkg_response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/zawaj_pkg_response.APIError"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/zawaj_pkg_response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/zawaj_pkg_response.APIError"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/weddings/{id}/join-requests/{requestId}/approve": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Creates the membership. The optional role may lower the requested role, never raise it.\nA user the owner removed meanwhile gets 403 removed_from_wedding; the request is still closed (state changed), so clients should refresh the list rather than treat the error as a no-op.\nA user who joined another way meanwhile: 200, request closed, no notification.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "members"
+                ],
+                "summary": "Approve a join request (owner only)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Wedding ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Join request ID",
+                        "name": "requestId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Optional lower role",
+                        "name": "body",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/zawaj_internal_dto.ApproveJoinRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/zawaj_pkg_response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/zawaj_internal_models.JoinRequest"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/zawaj_pkg_response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/zawaj_pkg_response.APIError"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "not the owner, or removed_from_wedding",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/zawaj_pkg_response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/zawaj_pkg_response.APIError"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "not pending in this wedding",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/zawaj_pkg_response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/zawaj_pkg_response.APIError"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/weddings/{id}/join-requests/{requestId}/decline": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "The requester may ask again after 24 hours.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "members"
+                ],
+                "summary": "Decline a join request (owner only)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Wedding ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Join request ID",
+                        "name": "requestId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/zawaj_pkg_response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/zawaj_internal_models.JoinRequest"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/zawaj_pkg_response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/zawaj_pkg_response.APIError"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "not pending in this wedding",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/zawaj_pkg_response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/zawaj_pkg_response.APIError"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
         "/weddings/{id}/members": {
             "get": {
                 "security": [
@@ -3136,7 +3596,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Owner can remove anyone; any member can remove themselves (leave).",
+                "description": "Owner can remove anyone; any member can remove themselves (leave).\nAn owner removal is remembered: invite links can no longer re-admit that user (only a new username invite can).\nIt also withdraws their pending username invites. Invite links stay active.",
                 "produces": [
                     "application/json"
                 ],
@@ -3223,6 +3683,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "The role is also recorded as the member's ceiling: a later join request through an invite link can't ask for more.",
                 "consumes": [
                     "application/json"
                 ],
@@ -3517,6 +3978,18 @@ const docTemplate = `{
                 }
             }
         },
+        "zawaj_internal_dto.ApproveJoinRequest": {
+            "type": "object",
+            "properties": {
+                "role": {
+                    "type": "string",
+                    "enum": [
+                        "editor",
+                        "viewer"
+                    ]
+                }
+            }
+        },
         "zawaj_internal_dto.AuthResponse": {
             "type": "object",
             "properties": {
@@ -3628,6 +4101,17 @@ const docTemplate = `{
                 "name": {
                     "type": "string",
                     "maxLength": 120
+                }
+            }
+        },
+        "zawaj_internal_dto.DeleteAccountRequest": {
+            "type": "object",
+            "required": [
+                "password"
+            ],
+            "properties": {
+                "password": {
+                    "type": "string"
                 }
             }
         },
@@ -3842,6 +4326,10 @@ const docTemplate = `{
                 "display_name": {
                     "type": "string",
                     "maxLength": 80
+                },
+                "phone": {
+                    "type": "string",
+                    "maxLength": 20
                 }
             }
         },
@@ -3885,16 +4373,122 @@ const docTemplate = `{
         "zawaj_internal_dto.UserResponse": {
             "type": "object",
             "properties": {
+                "dark_mode": {
+                    "type": "boolean"
+                },
                 "display_name": {
                     "type": "string"
                 },
                 "id": {
                     "type": "string"
                 },
+                "notif_push": {
+                    "type": "boolean"
+                },
+                "notif_rsvp": {
+                    "type": "boolean"
+                },
+                "phone": {
+                    "type": "string"
+                },
                 "username": {
                     "type": "string"
                 }
             }
+        },
+        "zawaj_internal_models.JoinRequest": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "decided_at": {
+                    "type": "string"
+                },
+                "decided_by": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "link_id": {
+                    "type": "string"
+                },
+                "role": {
+                    "$ref": "#/definitions/zawaj_internal_models.Role"
+                },
+                "status": {
+                    "$ref": "#/definitions/zawaj_internal_models.JoinRequestStatus"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                },
+                "wedding_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "zawaj_internal_models.JoinRequestStatus": {
+            "type": "string",
+            "enum": [
+                "pending",
+                "approved",
+                "declined",
+                "closed"
+            ],
+            "x-enum-varnames": [
+                "JoinPending",
+                "JoinApproved",
+                "JoinDeclined",
+                "JoinClosed"
+            ]
+        },
+        "zawaj_internal_models.Role": {
+            "type": "string",
+            "enum": [
+                "owner",
+                "editor",
+                "viewer"
+            ],
+            "x-enum-varnames": [
+                "RoleOwner",
+                "RoleEditor",
+                "RoleViewer"
+            ]
+        },
+        "zawaj_internal_service.JoinResult": {
+            "type": "object",
+            "properties": {
+                "request_id": {
+                    "type": "string"
+                },
+                "role": {
+                    "$ref": "#/definitions/zawaj_internal_models.Role"
+                },
+                "status": {
+                    "$ref": "#/definitions/zawaj_internal_service.JoinStatus"
+                },
+                "wedding_id": {
+                    "type": "string"
+                },
+                "wedding_name": {
+                    "type": "string"
+                }
+            }
+        },
+        "zawaj_internal_service.JoinStatus": {
+            "type": "string",
+            "enum": [
+                "member",
+                "pending"
+            ],
+            "x-enum-varnames": [
+                "JoinStatusMember",
+                "JoinStatusPending"
+            ]
         },
         "zawaj_pkg_response.APIError": {
             "type": "object",

@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // WeddingRepo is data access for weddings, memberships, and invite links.
@@ -66,9 +67,22 @@ func (r *WeddingRepo) ByID(ctx context.Context, id uuid.UUID) (*models.Wedding, 
 	return &w, nil
 }
 
-// Update persists changes to a wedding.
-func (r *WeddingRepo) Update(ctx context.Context, w *models.Wedding) error {
-	return r.db.WithContext(ctx).Save(w).Error
+// UpdateColumns writes only the given columns of a wedding, or returns
+// ErrNotFound if it's gone. Naming just the edited columns means an edit can't
+// write back a stale owner_id (from a concurrent transfer), and a plain UPDATE
+// never falls back to INSERT, so it can't resurrect a deleted wedding.
+func (r *WeddingRepo) UpdateColumns(ctx context.Context, weddingID uuid.UUID, cols map[string]any) error {
+	if len(cols) == 0 {
+		return nil
+	}
+	res := r.db.WithContext(ctx).Model(&models.Wedding{}).Where("id = ?", weddingID).Updates(cols)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // Delete removes a wedding and its dependent rows (memberships, guests, notes,
@@ -83,6 +97,8 @@ func (r *WeddingRepo) Delete(ctx context.Context, id uuid.UUID) error {
 			"DELETE FROM activity_logs WHERE wedding_id = ?",
 			"DELETE FROM invite_links WHERE wedding_id = ?",
 			"DELETE FROM memberships WHERE wedding_id = ?",
+			"DELETE FROM membership_ceilings WHERE wedding_id = ?",
+			"DELETE FROM join_requests WHERE wedding_id = ?",
 		} {
 			if err := tx.Exec(q, id).Error; err != nil {
 				return err
@@ -131,48 +147,122 @@ func (r *WeddingRepo) ListMembers(ctx context.Context, weddingID uuid.UUID) ([]M
 	return out, err
 }
 
-// UpsertMembership creates or updates a user's membership+role on a wedding.
-func (r *WeddingRepo) UpsertMembership(ctx context.Context, weddingID, userID uuid.UUID, role models.Role) error {
-	var m models.Membership
-	err := r.db.WithContext(ctx).Where("wedding_id = ? AND user_id = ?", weddingID, userID).First(&m).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return r.db.WithContext(ctx).Create(&models.Membership{
-			WeddingID: weddingID, UserID: userID, Role: role, JoinedAt: time.Now(),
-		}).Error
-	}
-	if err != nil {
-		return err
-	}
-	m.Role = role
-	return r.db.WithContext(ctx).Save(&m).Error
+// UpsertMembership creates a user's membership on a wedding, or sets its role
+// if it exists, in one atomic statement (concurrent calls can't collide), and
+// closes the user's pending join requests for the wedding — they're a member
+// now — in the same transaction. viaLinkID records the invite link used when
+// this creates the membership (nil for username invites); an existing
+// membership keeps its original one.
+func (r *WeddingRepo) UpsertMembership(ctx context.Context, weddingID, userID uuid.UUID, role models.Role, viaLinkID *uuid.UUID) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		m := &models.Membership{WeddingID: weddingID, UserID: userID, Role: role, JoinedAt: time.Now(), ViaLinkID: viaLinkID}
+		if err := tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "wedding_id"}, {Name: "user_id"}},
+			DoUpdates: clause.Assignments(map[string]any{"role": role, "updated_at": time.Now()}),
+		}).Create(m).Error; err != nil {
+			return err
+		}
+		return closePendingJoins(tx, weddingID, userID)
+	})
 }
 
-// SetMemberRole changes an existing member's role, or ErrNotFound.
+// SetMemberRole changes an existing member's role (owner decision), or
+// ErrNotFound. The role is also recorded as the member's ceiling, in the same
+// transaction, so a later join request through an invite link can't ask for
+// more.
 func (r *WeddingRepo) SetMemberRole(ctx context.Context, weddingID, userID uuid.UUID, role models.Role) error {
-	res := r.db.WithContext(ctx).Model(&models.Membership{}).
-		Where("wedding_id = ? AND user_id = ?", weddingID, userID).
-		Update("role", role)
-	if res.Error != nil {
-		return res.Error
-	}
-	if res.RowsAffected == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&models.Membership{}).
+			Where("wedding_id = ? AND user_id = ?", weddingID, userID).
+			Update("role", role)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return ErrNotFound
+		}
+		return setCeiling(tx, weddingID, userID, string(role))
+	})
 }
 
-// RemoveMember deletes a membership, or ErrNotFound.
-func (r *WeddingRepo) RemoveMember(ctx context.Context, weddingID, userID uuid.UUID) error {
-	res := r.db.WithContext(ctx).
-		Where("wedding_id = ? AND user_id = ?", weddingID, userID).
-		Delete(&models.Membership{})
+// RemoveMember deletes a membership, or ErrNotFound. When the owner removes
+// someone (byOwner), that is recorded as a "none" ceiling so invite links
+// can't re-admit them, and their pending username invites to this wedding are
+// withdrawn (an old one would otherwise block a fresh owner invite). A member
+// leaving on their own keeps any earlier ceiling. Invite links are left
+// active: joining through one needs the owner's approval anyway.
+func (r *WeddingRepo) RemoveMember(ctx context.Context, weddingID, userID uuid.UUID, byOwner bool) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Where("wedding_id = ? AND user_id = ?", weddingID, userID).
+			Delete(&models.Membership{})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return ErrNotFound
+		}
+		if !byOwner {
+			return nil
+		}
+		if err := closePendingJoins(tx, weddingID, userID); err != nil {
+			return err
+		}
+		if err := tx.Model(&models.WeddingInvite{}).
+			Where("wedding_id = ? AND invitee_id = ? AND status = ?", weddingID, userID, models.InvitePending).
+			Update("status", models.InviteRevoked).Error; err != nil {
+			return err
+		}
+		return setCeiling(tx, weddingID, userID, CeilingRemoved)
+	})
+}
+
+// ─── Membership ceilings ────────────────────────────────────────────────────
+
+// CeilingRemoved is the ceiling recorded when the owner removes a member.
+const CeilingRemoved = "none"
+
+// Ceiling is the owner's last decision about a (former) member: the highest
+// role invite links may grant them ("editor"/"viewer"), or CeilingRemoved.
+type Ceiling struct {
+	MaxRole string
+	SetAt   time.Time
+}
+
+// GetCeiling returns the user's ceiling on a wedding, or ErrNotFound.
+func (r *WeddingRepo) GetCeiling(ctx context.Context, weddingID, userID uuid.UUID) (*Ceiling, error) {
+	var c Ceiling
+	res := r.db.WithContext(ctx).Raw(
+		"SELECT max_role, set_at FROM membership_ceilings WHERE wedding_id = ? AND user_id = ?",
+		weddingID, userID).Scan(&c)
 	if res.Error != nil {
-		return res.Error
+		return nil, res.Error
 	}
 	if res.RowsAffected == 0 {
-		return ErrNotFound
+		return nil, ErrNotFound
 	}
-	return nil
+	return &c, nil
+}
+
+// SetCeiling records an owner decision outside a role change or removal (an
+// owner username invite the user accepted).
+func (r *WeddingRepo) SetCeiling(ctx context.Context, weddingID, userID uuid.UUID, maxRole string) error {
+	return setCeiling(r.db.WithContext(ctx), weddingID, userID, maxRole)
+}
+
+// closePendingJoins closes a user's pending join requests for a wedding (they
+// joined another way or were removed, so there's nothing left to decide).
+func closePendingJoins(tx *gorm.DB, weddingID, userID uuid.UUID) error {
+	return tx.Model(&models.JoinRequest{}).
+		Where("wedding_id = ? AND user_id = ? AND status = ?", weddingID, userID, models.JoinPending).
+		Updates(map[string]any{"status": models.JoinClosed, "decided_at": time.Now()}).Error
+}
+
+func setCeiling(tx *gorm.DB, weddingID, userID uuid.UUID, maxRole string) error {
+	return tx.Exec(`INSERT INTO membership_ceilings (wedding_id, user_id, max_role, set_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT (wedding_id, user_id) DO UPDATE SET max_role = EXCLUDED.max_role, set_at = EXCLUDED.set_at`,
+		// App clock, like invites' created_at, so the two compare consistently.
+		weddingID, userID, maxRole, time.Now()).Error
 }
 
 // TransferOwnership atomically hands a wedding to newOwnerID: it flips the
@@ -245,15 +335,21 @@ func (r *WeddingRepo) LinkByToken(ctx context.Context, tok string) (*models.Invi
 }
 
 // RevokeLink marks a link revoked, scoped to its wedding, or ErrNotFound.
+// Pending join requests made through it are closed in the same transaction,
+// so revoking a leaked link also clears the requests it let in.
 func (r *WeddingRepo) RevokeLink(ctx context.Context, weddingID, linkID uuid.UUID) error {
-	res := r.db.WithContext(ctx).Model(&models.InviteLink{}).
-		Where("id = ? AND wedding_id = ?", linkID, weddingID).
-		Update("revoked", true)
-	if res.Error != nil {
-		return res.Error
-	}
-	if res.RowsAffected == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&models.InviteLink{}).
+			Where("id = ? AND wedding_id = ?", linkID, weddingID).
+			Update("revoked", true)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return ErrNotFound
+		}
+		return tx.Model(&models.JoinRequest{}).
+			Where("wedding_id = ? AND link_id = ? AND status = ?", weddingID, linkID, models.JoinPending).
+			Updates(map[string]any{"status": models.JoinClosed, "decided_at": time.Now()}).Error
+	})
 }

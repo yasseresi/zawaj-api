@@ -25,7 +25,7 @@ func RunMigrations(dsn string) error {
 	if err != nil {
 		return fmt.Errorf("database: init migrator: %w", err)
 	}
-	defer m.Close()
+	defer func() { _, _ = m.Close() }()
 
 	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		return fmt.Errorf("database: migrate up: %w", err)

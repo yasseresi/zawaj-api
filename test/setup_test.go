@@ -5,11 +5,14 @@ package test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -29,6 +32,37 @@ import (
 // the test when TEST_DATABASE_URL is not set.
 func newApp(t *testing.T) *gin.Engine {
 	t.Helper()
+	return newAppWithPusher(t, nil)
+}
+
+// newAppWithPusher is newApp with a custom push sender (nil = no-op), for
+// tests that assert on what gets pushed.
+func newAppWithPusher(t *testing.T, pusher push.Sender) *gin.Engine {
+	t.Helper()
+	e, _ := newAppWithDB(t, pusher)
+	return e
+}
+
+// newAppWithDB is newAppWithPusher that also returns the database handle, for
+// tests that exercise repositories directly or inspect stored rows.
+func newAppWithDB(t *testing.T, pusher push.Sender) (*gin.Engine, *gorm.DB) {
+	t.Helper()
+	a := newTestApp(t, pusher)
+	return a.e, a.db
+}
+
+// testApp is the fully wired engine plus the handles tests reach into.
+type testApp struct {
+	e     *gin.Engine
+	db    *gorm.DB
+	notif *service.NotificationService // Wait() blocks until pushes are sent
+}
+
+// newTestApp builds the engine against a clean test database (skipping when
+// TEST_DATABASE_URL is unset) and closes its connection pool when the test
+// ends, so long runs don't exhaust Postgres connections.
+func newTestApp(t *testing.T, pusher push.Sender) *testApp {
+	t.Helper()
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("TEST_DATABASE_URL not set; skipping integration test")
@@ -39,8 +73,12 @@ func newApp(t *testing.T) *gin.Engine {
 	if err != nil {
 		t.Fatalf("connect test db: %v", err)
 	}
-	if err := database.Migrate(db); err != nil {
-		t.Fatalf("migrate: %v", err)
+	if sqlDB, err := db.DB(); err == nil {
+		t.Cleanup(func() { _ = sqlDB.Close() })
+	}
+	migrateOnce.Do(func() { migrateErr = resetSchema(db, dsn) })
+	if migrateErr != nil {
+		t.Fatalf("migrate: %v", migrateErr)
 	}
 	cleanDB(t, db)
 
@@ -54,10 +92,16 @@ func newApp(t *testing.T) *gin.Engine {
 	deviceRepo := repository.NewDeviceTokenRepo(db)
 	auditSvc := service.NewAuditService(repository.NewAuditRepo(db), log)
 	activitySvc := service.NewActivityService(repository.NewActivityRepo(db), log)
-	notifSvc := service.NewNotificationService(notifRepo, weddingRepo, deviceRepo, push.NewNoop(log), log)
+	if pusher == nil {
+		pusher = push.NewNoop(log)
+	}
+	notifSvc := service.NewNotificationService(notifRepo, weddingRepo, deviceRepo, pusher, log)
 	guestSvc := service.NewGuestService(guestRepo, activitySvc, notifSvc)
 
-	return router.New(db, log, true, []string{"*"}, 0, 0, tokens, repository.NewIdempotencyRepo(db), // rate limiting disabled in tests
+	// Let async pushes finish before the pool closes.
+	t.Cleanup(notifSvc.Wait)
+
+	e := router.New(db, log, true, []string{"*"}, 0, 0, tokens, repository.NewIdempotencyRepo(db), // rate limiting disabled in tests
 		handler.NewAuth(service.NewAuthService(userRepo, repository.NewRefreshTokenRepo(db), tokens, 5, time.Minute), auditSvc, tokens),
 		handler.NewWedding(service.NewWeddingService(weddingRepo), auditSvc, weddingRepo, tokens),
 		handler.NewGuest(guestSvc, activitySvc, weddingRepo, tokens),
@@ -69,13 +113,44 @@ func newApp(t *testing.T) *gin.Engine {
 		handler.NewInvite(
 			service.NewInviteService(repository.NewInviteRepo(db), weddingRepo, userRepo, activitySvc, notifSvc),
 			weddingRepo, tokens),
+		handler.NewJoinRequest(
+			service.NewJoinService(weddingRepo, repository.NewJoinRequestRepo(db), userRepo, activitySvc, notifSvc),
+			auditSvc, weddingRepo, tokens),
 	)
+	return &testApp{e: e, db: db, notif: notifSvc}
 }
+
+var (
+	migrateOnce sync.Once
+	migrateErr  error
+)
+
+// resetSchema rebuilds the test database from the production SQL migrations
+// (once per test process), so integration tests run against exactly the
+// schema that ships — indexes, partial indexes and constraints included —
+// rather than a GORM AutoMigrate approximation.
+func resetSchema(db *gorm.DB, dsn string) error {
+	var name string
+	if err := db.Raw("SELECT current_database()").Scan(&name).Error; err != nil {
+		return err
+	}
+	if !isTestDatabase(name) {
+		return fmt.Errorf("refusing to reset schema of %q: TEST_DATABASE_URL must point at a database whose name ends in _test", name)
+	}
+	if err := db.Exec("DROP SCHEMA public CASCADE; CREATE SCHEMA public;").Error; err != nil {
+		return err
+	}
+	return database.RunMigrations(dsn)
+}
+
+// isTestDatabase guards the destructive schema reset: only databases named
+// *_test may be wiped, so a mis-set TEST_DATABASE_URL can't destroy real data.
+func isTestDatabase(name string) bool { return strings.HasSuffix(name, "_test") }
 
 // cleanDB truncates all tables so each test starts from empty.
 func cleanDB(t *testing.T, db *gorm.DB) {
 	t.Helper()
-	err := db.Exec("TRUNCATE users, weddings, memberships, invite_links, guests, guest_notes, activity_logs, notifications, device_tokens, refresh_tokens, idempotency_keys, audit_logs RESTART IDENTITY CASCADE").Error
+	err := db.Exec("TRUNCATE users, weddings, memberships, membership_ceilings, join_requests, wedding_invites, invite_links, guests, guest_notes, activity_logs, notifications, device_tokens, refresh_tokens, idempotency_keys, audit_logs RESTART IDENTITY CASCADE").Error
 	if err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
@@ -159,8 +234,8 @@ func joinAs(t *testing.T, e *gin.Engine, ownerTok, wid, role, memberTok string) 
 	t.Helper()
 	_, lb := do(t, e, "POST", "/api/v1/weddings/"+wid+"/invite-links", ownerTok, map[string]any{"role": role})
 	tok, _ := dataOf(lb)["token"].(string)
-	if code, b := do(t, e, "POST", "/api/v1/invite/"+tok+"/accept", memberTok, nil); code != 200 {
-		t.Fatalf("join as %s: want 200, got %d (%v)", role, code, b)
+	if got := joinViaLink(t, e, ownerTok, wid, tok, memberTok); got != role {
+		t.Fatalf("join as %s: got role %v", role, got)
 	}
 }
 

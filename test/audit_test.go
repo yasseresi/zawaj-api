@@ -15,13 +15,13 @@ func auditActions(t *testing.T) map[string]int {
 	if err != nil {
 		t.Fatalf("open audit db: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	rows, err := db.Query("SELECT action, count(*) FROM audit_logs GROUP BY action")
 	if err != nil {
 		t.Fatalf("query audit_logs: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	out := map[string]int{}
 	for rows.Next() {

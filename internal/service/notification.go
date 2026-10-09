@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sync"
 	"time"
 
 	"zawaj/internal/apperr"
@@ -20,6 +21,10 @@ import (
 // originating request so a slow FCM call never delays the API response.
 const pushTimeout = 10 * time.Second
 
+// noteGuestStatusChanged is the RSVP-change notification type; its push is
+// gated on the recipient's notif_rsvp preference (the in-app row is kept).
+const noteGuestStatusChanged = "guest_status_changed"
+
 // NotificationService fans out and reads personal notifications. It implements
 // events.Notifier so producer services (guests, members) can emit notifications
 // without importing this package.
@@ -29,6 +34,28 @@ type NotificationService struct {
 	devices  *repository.DeviceTokenRepo
 	pusher   push.Sender
 	log      *slog.Logger
+	inflight sync.WaitGroup // detached push deliveries, for Wait
+}
+
+// Wait blocks until every push started so far has been delivered (or given
+// up). For graceful shutdown and deterministic tests; pushes stay detached
+// from the request that triggered them.
+func (s *NotificationService) Wait() { s.inflight.Wait() }
+
+// WaitContext is Wait bounded by ctx: it returns ctx.Err() if pushes are
+// still running at the deadline (graceful shutdown must not hang on FCM).
+func (s *NotificationService) WaitContext(ctx context.Context) error {
+	done := make(chan struct{})
+	go func() {
+		s.inflight.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // NewNotificationService builds the service. devices and pusher power FCM push;
@@ -71,7 +98,9 @@ func (s *NotificationService) Notify(ctx context.Context, n events.Note) {
 		return
 	}
 
-	s.pushToDevices(recipients, n)
+	if !n.Silent {
+		s.pushToDevices(recipients, n)
+	}
 }
 
 // NotifyUser delivers a single notification to one user (e.g. an invite to a
@@ -95,21 +124,25 @@ func (s *NotificationService) NotifyUser(ctx context.Context, userID uuid.UUID, 
 		s.log.Error("notify user: create notification failed", "error", err, "user_id", userID, "type", n.Type)
 		return
 	}
-	s.pushToDevices([]uuid.UUID{userID}, n)
+	if !n.Silent {
+		s.pushToDevices([]uuid.UUID{userID}, n)
+	}
 }
 
 // pushToDevices delivers a fan-out as FCM push to recipients who have push
-// enabled. It runs detached from the request (its own timeout) and prunes tokens
+// enabled (and, for RSVP changes, RSVP alerts enabled). It runs detached from the request (its own timeout) and prunes tokens
 // FCM reports as invalid. Best-effort: failures are logged, never surfaced.
 func (s *NotificationService) pushToDevices(recipients []uuid.UUID, n events.Note) {
 	if s.pusher == nil || s.devices == nil || len(recipients) == 0 {
 		return
 	}
+	s.inflight.Add(1)
 	go func() {
+		defer s.inflight.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), pushTimeout)
 		defer cancel()
 
-		tokens, err := s.devices.TokensForUsers(ctx, recipients, true)
+		tokens, err := s.devices.TokensForUsers(ctx, recipients, true, n.Type == noteGuestStatusChanged)
 		if err != nil {
 			s.log.Error("notify: load device tokens failed", "error", err, "type", n.Type)
 			return

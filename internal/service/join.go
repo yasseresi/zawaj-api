@@ -95,11 +95,11 @@ func (s *JoinService) RequestFromLink(ctx context.Context, tok string, userID uu
 		return nil, err
 	}
 	declinedAt, derr := s.joins.LastDeclinedAt(ctx, l.WeddingID, userID)
-	if derr == nil && time.Since(declinedAt) < joinRequestCooldown {
-		return nil, apperr.JoinRequestDeclined("the owner declined your request; try again later")
-	}
 	if derr != nil && !errors.Is(derr, repository.ErrNotFound) {
 		return nil, apperr.Internal("join failed")
+	}
+	if derr == nil && time.Since(declinedAt) < joinRequestCooldown {
+		return nil, apperr.JoinRequestDeclined("the owner declined your request; try again later")
 	}
 
 	res, err := s.joins.CreatePending(ctx, l.WeddingID, userID, l.ID, role, maxPendingPerWedding)

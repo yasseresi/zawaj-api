@@ -69,6 +69,8 @@ type JoinRequest struct {
 	Status    JoinRequestStatus `gorm:"size:10;not null;default:pending" json:"status"`
 	DecidedAt *time.Time        `json:"decided_at,omitempty"`
 	DecidedBy *uuid.UUID        `gorm:"type:uuid" json:"decided_by,omitempty"`
+	// OwnerNotified: creating this request pushed the owner.
+	OwnerNotified bool `gorm:"not null;default:false" json:"-"`
 }
 
 // ActivityAction enumerates entries in the activity feed / per-guest history.

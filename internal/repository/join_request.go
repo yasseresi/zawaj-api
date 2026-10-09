@@ -40,13 +40,14 @@ type PendingResult struct {
 	// Created: this call inserted the request (false: it was already pending).
 	Created bool
 	// NotifyOwner: push the owner about this request — the queue was empty,
-	// or its oldest request has waited over staleAfter (so an undrained queue
-	// still re-notifies about once a day). Otherwise the owner already knows.
+	// or no pending request has pushed them within staleAfter (so an
+	// undrained queue re-notifies about once a day, never once per request).
+	// Otherwise the owner already knows.
 	NotifyOwner bool
 }
 
-// staleAfter is how long the oldest pending request may wait before a new
-// request pushes the owner again.
+// staleAfter is how long after the owner's last push for a pending request
+// a new request pushes them again.
 const staleAfter = 24 * time.Hour
 
 // CreatePending records a pending request, or returns the one already pending
@@ -72,11 +73,11 @@ func (r *JoinRequestRepo) CreatePending(ctx context.Context, weddingID, userID, 
 			return err
 		}
 		var stats struct {
-			Pending int64
-			Oldest  *time.Time
+			Pending    int64
+			LastPushed *time.Time
 		}
 		if err := pendingForWedding(tx, weddingID).
-			Select("count(*) AS pending, min(join_requests.created_at) AS oldest").
+			Select("count(*) AS pending, max(join_requests.created_at) FILTER (WHERE join_requests.owner_notified) AS last_pushed").
 			Scan(&stats).Error; err != nil {
 			return err
 		}
@@ -84,7 +85,11 @@ func (r *JoinRequestRepo) CreatePending(ctx context.Context, weddingID, userID, 
 		if pending >= int64(maxPending) {
 			return ErrJoinQueueFull
 		}
-		fresh := &models.JoinRequest{WeddingID: weddingID, UserID: userID, LinkID: linkID, Role: role, Status: models.JoinPending}
+		// Push when the queue was empty, or when no pending request has
+		// pushed the owner within staleAfter (so an undrained queue re-pushes
+		// at most about once a day, however many requests arrive).
+		notify := pending == 0 || stats.LastPushed == nil || time.Since(*stats.LastPushed) > staleAfter
+		fresh := &models.JoinRequest{WeddingID: weddingID, UserID: userID, LinkID: linkID, Role: role, Status: models.JoinPending, OwnerNotified: notify}
 		res := tx.Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "wedding_id"}, {Name: "user_id"}},
 			// Literal predicate, never a bind parameter: under a cached generic
@@ -96,8 +101,7 @@ func (r *JoinRequestRepo) CreatePending(ctx context.Context, weddingID, userID, 
 		if res.Error != nil {
 			return res.Error
 		}
-		stale := stats.Oldest != nil && time.Since(*stats.Oldest) > staleAfter
-		out = PendingResult{Request: fresh, Created: res.RowsAffected == 1, NotifyOwner: pending == 0 || stale}
+		out = PendingResult{Request: fresh, Created: res.RowsAffected == 1, NotifyOwner: notify}
 		return nil
 	})
 	if err != nil {

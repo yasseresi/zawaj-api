@@ -820,3 +820,62 @@ func TestOwnerIsPushedAgainWhenTheQueueIsStale(t *testing.T) {
 		t.Fatalf("pushes with a request waiting >24h: want 2, got %d", n)
 	}
 }
+
+// staleQueueApp registers sarah's device and a link, then queues one request
+// that is backdated by age. It returns the app, the link and a user factory.
+func staleQueueApp(t *testing.T, age string) (*testApp, *recordingSender, string, func(string) string) {
+	t.Helper()
+	rec := &recordingSender{}
+	a := newTestApp(t, rec)
+	sarah, _ := register(t, a.e, "sarah")
+	wid := createWedding(t, a.e, sarah, "L&O")
+	do(t, a.e, http.MethodPost, "/api/v1/me/devices", sarah, map[string]any{"token": "sarah-device", "platform": "ios"})
+	tok := editorLink(t, a.e, sarah, wid)
+	user := func(name string) string { u, _ := register(t, a.e, name); return u }
+	_, ob := acceptLink(t, a.e, tok, user("first"))
+	rid, _ := dataOf(ob)["request_id"].(string)
+	if err := a.db.Exec("UPDATE join_requests SET created_at = now() - ?::interval WHERE id = ?", age, rid).Error; err != nil {
+		t.Fatal(err)
+	}
+	return a, rec, tok, user
+}
+
+// A burst into a stale queue re-pushes the owner once, not once per request.
+func TestStaleQueueRePushesOncePerBurst(t *testing.T) {
+	a, rec, tok, user := staleQueueApp(t, "25 hours")
+	for _, name := range []string{"burst1", "burst2", "burst3"} {
+		acceptLink(t, a.e, tok, user(name))
+	}
+	a.notif.Wait()
+	if n := rec.count("join_requested"); n != 2 {
+		t.Fatalf("stale queue then 3 requests: want 2 pushes (first + one re-push), got %d", n)
+	}
+}
+
+// Under 24h since the owner was last pushed, new requests stay in-app only.
+func TestQueueUnder24hIsNotRePushed(t *testing.T) {
+	a, rec, tok, user := staleQueueApp(t, "23 hours")
+	acceptLink(t, a.e, tok, user("second"))
+	a.notif.Wait()
+	if n := rec.count("join_requested"); n != 1 {
+		t.Fatalf("queue 23h old: want 1 push, got %d", n)
+	}
+}
+
+// The re-push looks at when the owner was last pushed, not the newest
+// request: a fresh request that was only stored in-app doesn't reset it.
+func TestStaleQueueWithFreshTailIsRePushed(t *testing.T) {
+	a, rec, tok, user := staleQueueApp(t, "25 hours")
+	// A later request that was stored in-app only (no push), 2h ago.
+	acceptLink(t, a.e, tok, user("quiet"))
+	a.notif.Wait()
+	before := rec.count("join_requested")
+	if err := a.db.Exec("UPDATE join_requests SET created_at = now() - interval '2 hours', owner_notified = false WHERE created_at > now() - interval '1 minute'").Error; err != nil {
+		t.Fatal(err)
+	}
+	acceptLink(t, a.e, tok, user("third"))
+	a.notif.Wait()
+	if n := rec.count("join_requested"); n != before+1 {
+		t.Fatalf("stale head + fresh unpushed tail: want a re-push, got %d -> %d", before, n)
+	}
+}

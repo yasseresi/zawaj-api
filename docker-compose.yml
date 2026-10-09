@@ -20,6 +20,9 @@ services:
 
   api:
     build: .
+    # Shutdown drains HTTP (10s), then pushes (5s), then tracing (3s); the
+    # default 10s would SIGKILL before pushes are delivered.
+    stop_grace_period: 25s
     depends_on:
       db:
         condition: service_healthy

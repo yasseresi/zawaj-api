@@ -176,7 +176,9 @@ membership**, never from the request body. All repository queries are scoped by 
     serialized per wedding by an advisory lock); the owner is pushed when the queue was
     empty, or when no pending request has pushed them in the last 24h (tracked by
     `join_requests.owner_notified`, migration 000013), so an undrained queue re-pushes at
-    most about once a day; other requests are stored in-app silently. Revoking a link
+    most about once a day; other requests are stored in-app silently. Deciding the request
+    that pushed resets the clock (the next arrival pushes, so at most one push per owner
+    action), and right after migration 000013 each non-empty queue pushes once. Revoking a link
     closes the requests made through it.
   - **No stale requests:** a request is `closed` (no cooldown) when the user joins another
     way (closed inside `UpsertMembership`'s transaction), is removed by the owner, or its

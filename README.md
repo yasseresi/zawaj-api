@@ -180,3 +180,9 @@ To trace how anything is wired, start at [`cmd/api/main.go`](cmd/api/main.go).
 | `bind: address already in use` on `:8080` | kill the stray API: `lsof -ti:8080 \| xargs kill` |
 | `psql: could not connect` in the script | start Postgres (`brew services start postgresql`) or use `make up` |
 | script picks the wrong superuser | `./scripts/setup-db.sh --superuser postgres` |
+
+---
+
+## 👤 Author
+
+**Yasser Korzane** — Flutter & Go developer · [GitHub](https://github.com/yasseresi) · [LinkedIn](https://www.linkedin.com/in/korzane-yasser)
